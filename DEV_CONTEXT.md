@@ -4,11 +4,20 @@
 - Дата: 2026-02-22
 
 ## Текущий статус
-- Этап: Шаблон готов
-- Последнее действие: Добавлены hooks, commands, MCP серверы, permissions, git init
+- Этап: Шаблон готов v2
+- Последнее действие: Agents, /handoff, .mcp.json, оптимизация CLAUDE.md, protect-main hook
 - Следующий шаг: Определить первый проект
 
 ## История изменений
+
+### 2026-02-22 — Улучшения по best practices (сессия 3)
+- Что сделано:
+  - Subagents: code-reviewer (haiku), security-auditor (sonnet), architect (opus)
+  - Slash command: /handoff — авто-сохранение прогресса перед /clear
+  - .mcp.json — портабельная конфигурация MCP серверов
+  - CLAUDE.md оптимизирован: 94 → 54 строки, @-ссылки, убрано дублирование с хуками
+  - Hook: protect-main блокирует коммиты в main/master (проверен в бою)
+- Решения: Агенты на разных моделях по сложности задачи. @-ссылки экономят контекст.
 
 ### 2026-02-22 — Финализация шаблона (сессия 2)
 - Что сделано:
@@ -49,4 +58,9 @@
 - [x] Git init + первый коммит
 - [x] init-project.sh
 - [x] Permissions расширены
+- [x] Agents: code-reviewer, security-auditor, architect
+- [x] Command: /handoff
+- [x] .mcp.json (портабельная конфигурация)
+- [x] CLAUDE.md оптимизирован (54 строки)
+- [x] Hook: protect-main
 - [ ] Определить первый проект

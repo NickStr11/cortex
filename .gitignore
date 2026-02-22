@@ -50,5 +50,8 @@ node_modules/
 # Video analysis output
 video_output/
 
+# Screenshots
+screenshots/
+
 # Claude Code local settings (permissions, not for sharing)
 .claude/settings.local.json
