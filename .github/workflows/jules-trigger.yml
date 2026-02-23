@@ -1,0 +1,20 @@
+name: Jules Trigger
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  confirm-jules:
+    if: github.event.label.name == 'jules'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Add confirmation comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "🚀 Jules has accepted the task and it has been added to the queue!"
