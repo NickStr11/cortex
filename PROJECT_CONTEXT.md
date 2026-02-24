@@ -38,14 +38,15 @@ Pull Requests → Human merges ✓
 ```
 
 ## Этапы
-1. [ ] `/council` — slash-команда для AI-консилиума (роли, промпты, сводка)
-2. [ ] `/dispatch` — создание GitHub Issues с назначением агентов
-3. [ ] GitHub Apps — подключить Codex + Jules к репо
-4. [ ] GitHub Actions — claude-code-action для auto-review PR
-5. [x] Heartbeat — авто-ресёрч AI/Tech трендов (HN + GitHub → cron каждые 3 дня)
+1. [x] `/council` — slash-команда для AI-консилиума (роли, промпты, сводка)
+2. [x] `/dispatch` — создание GitHub Issues с назначением агентов
+3. [x] GitHub Apps — подключить Codex + Jules к репо
+4. [x] GitHub Actions — claude-code-action для auto-review PR
+5. [x] Heartbeat — авто-ресёрч AI/Tech трендов (HN + GitHub + Reddit → cron каждые 3 дня)
+6. [x] Forge-port — хуки, агент, команды из claude-forge
 
 ## Definition of Done
-- [ ] `/council` генерирует задачи из PROJECT_CONTEXT.md
-- [ ] `/dispatch` создаёт Issues с правильными labels/assignees
-- [ ] Хотя бы один агент (Codex или Jules) успешно делает PR по issue
-- [ ] Полный цикл: план → issue → PR → merge
+- [x] `/council` генерирует задачи из PROJECT_CONTEXT.md
+- [x] `/dispatch` создаёт Issues с правильными labels/assignees
+- [x] Хотя бы один агент (Codex или Jules) успешно делает PR по issue
+- [x] Полный цикл: план → issue → PR → merge
