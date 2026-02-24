@@ -14,7 +14,7 @@ Cortex follows a command-based orchestration flow to automate development:
 ## Usage
 
 ### /council
-The `/council` command generates a set of tasks based on the current project context and defined roles. It analyzes the project's goals and breaks them down into actionable items for the AI agents.
+The `/council` command generates a set of tasks based on the current project context and defined roles. It analyzes the project's goals and breaks them down into actionable items for the AI agents. It also supports a **Forge Port Sprint** mode to benchmark against claude-forge and produce 3-5 concrete feature-port tasks for Cortex.
 
 ### /dispatch
 The `/dispatch` command takes the generated tasks and creates corresponding GitHub Issues. It automatically assigns the correct labels (e.g., `jules`) so the AI agents know which tasks to pick up and work on.
