@@ -4,13 +4,15 @@ from datetime import datetime, timezone
 
 from beartype import beartype
 
-from sources import GitHubRepo, HNStory
+from sources import GitHubRepo, HNStory, RedditPost, XTrend
 
 
 @beartype
 def format_raw_digest(
     hn_stories: list[HNStory],
     github_repos: list[GitHubRepo],
+    reddit_posts: list[RedditPost],
+    x_trends: list[XTrend],
 ) -> str:
     lines: list[str] = [
         f"# Heartbeat Raw Data — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
@@ -41,6 +43,30 @@ def format_raw_digest(
         if repo.topics:
             lines.append(f"   Topics: {', '.join(repo.topics[:5])}")
         lines.append("")
+
+    lines.extend([
+        f"## Reddit Top Posts ({len(reddit_posts)} found)",
+        "",
+    ])
+
+    for i, post in enumerate(reddit_posts, 1):
+        lines.append(
+            f"{i}. **{post.title}** "
+            f"(score: {post.score}, comments: {post.comments}, r/{post.subreddit})"
+        )
+        lines.append(f"   {post.url}")
+        lines.append("")
+
+    if x_trends:
+        lines.extend([
+            f"## X Trending Topics ({len(x_trends)} found)",
+            "",
+        ])
+        for i, trend in enumerate(x_trends, 1):
+            volume = f" ({trend.volume} posts)" if trend.volume else ""
+            lines.append(f"{i}. **{trend.name}**{volume}")
+            lines.append(f"   {trend.url}")
+            lines.append("")
 
     lines.extend([
         "---",
