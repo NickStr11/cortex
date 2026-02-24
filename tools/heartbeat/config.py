@@ -44,6 +44,13 @@ GITHUB_MIN_STARS = 5
 GITHUB_LOOKBACK_DAYS = 3
 GITHUB_RESULTS_LIMIT = 15
 
+# Reddit
+REDDIT_SUBREDDITS = ["MachineLearning", "artificial", "LocalLLaMA", "ChatGPT"]
+REDDIT_RESULTS_LIMIT = 20
+
+# X (Twitter)
+X_RESULTS_LIMIT = 10
+
 # Anthropic (digest mode only)
 ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 ANTHROPIC_MAX_TOKENS = 4096
