@@ -1,0 +1,21 @@
+[project]
+name = "cortex-metrics"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "beartype>=0.18.0",
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+]
