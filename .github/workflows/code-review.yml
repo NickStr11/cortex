@@ -1,0 +1,65 @@
+name: Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  claude-review:
+    if: contains(github.actor, 'jules') || contains(github.actor, 'codex')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          prompt: |
+            You are an expert AI code reviewer. Your task is to review this Pull Request for compliance with the project's rules, code quality, and security.
+
+            ### Project Rules to Enforce:
+
+            1. **General Structure (CLAUDE.md & AGENTS.md):**
+               - Maximum 700 lines per file.
+               - Maximum 70 lines per function.
+               - Maximum 4 levels of nesting.
+               - Follow Conventional Commits format for commit messages.
+               - No secrets, API keys, or hardcoded credentials.
+               - Small, focused PRs (one task per PR).
+
+            2. **Python Best Practices (docs/python-rules.md):**
+               - Every Python file MUST start with:
+                 ```python
+                 from __future__ import annotations
+                 from beartype import beartype
+                 ```
+               - Use `@beartype` decorator on all public functions.
+               - Complete type annotations for all function parameters and return types.
+               - Modern type syntax: `list[str]` (not `List[str]`), `X | None` (not `Optional[X]`).
+               - Avoid `Any` types unless strictly necessary and documented.
+
+            3. **Security:**
+               - Check for common vulnerabilities.
+               - Ensure no sensitive data is leaked.
+
+            4. **Quality & Maintainability:**
+               - Code should be self-explanatory and follow the flat structure principle.
+               - Minimum dependencies.
+               - Follow the "Build -> Types -> Lint -> Tests -> Security -> Diff" quality gate.
+
+            ### Instructions for Review:
+            - Provide specific, actionable feedback as comments on the PR code.
+            - If the PR is compliant with all rules, state that clearly.
+            - Focus on identifying violations of the specific project rules listed above.
+
+            Please provide your feedback as review comments directly on the Pull Request.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
