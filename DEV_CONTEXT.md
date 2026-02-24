@@ -4,71 +4,82 @@
 - Дата: 2026-02-24
 
 ## Текущий статус
-- Этап: Автоматизация CI для агентского цикла
-- Последнее действие: Валидация и фиксация auto-review workflow для PR от Jules/Codex (Issue #13)
-- Следующий шаг: Запустить следующий спринт через /council → /dispatch и проверить цикл на новой задаче
+- Этап: MVP завершён + forge-port. Система полностью рабочая.
+- Последнее действие: Портированы хуки, агент и команды из claude-forge. Jules написал тесты (97% coverage).
+- Следующий шаг: /council для планирования следующего спринта или новый проект (фриланс-бот)
 
 ## История изменений
 
-### 2026-02-24 — Закрытие Issue #13 (auto-review)
+### 2026-02-24 — Heartbeat + forge-port + тесты (сессия 4)
 - Что сделано:
-  - Проверен workflow `.github/workflows/code-review.yml` для авто-ревью PR
-  - Подтверждён триггер только для PR от агентских аккаунтов (Jules/Codex)
-  - Обновлён контекст разработки под текущий этап автоматизации
-- Решения: Закрепить авто-ревью как базовый quality gate перед ручным merge.
+  - Heartbeat модуль: Python-скрипт сканирует HN + GitHub Trending + Reddit
+  - `/heartbeat` slash-команда для ручного запуска
+  - `.github/workflows/heartbeat.yml` — cron каждые 3 дня
+  - Первый запуск heartbeat: 6 HN постов, 15 GitHub репо
+  - Auto-review PR: `.github/workflows/code-review.yml` (Jules, PR #14)
+  - Forge-port: 3 хука, 1 агент, 3 команды из claude-forge (PR #19)
+  - Jules добавил Reddit в heartbeat (PR #18)
+  - Jules написал тесты для heartbeat: 97% coverage (PR #21)
+  - `/learn` — мета-анализ: Jules >> Codex для кодовых задач
+- Решения: Codex плохо справляется с ресёрч-задачами, Jules надёжнее для кода.
 
-### 2026-02-22 — Улучшения по best practices (сессия 3)
+### 2026-02-23 — Тест Codex + исследование рынка (сессия 3)
 - Что сделано:
-  - Subagents: code-reviewer (haiku), security-auditor (sonnet), architect (opus)
-  - Slash command: /handoff — авто-сохранение прогресса перед /clear
-  - .mcp.json — портабельная конфигурация MCP серверов
-  - CLAUDE.md оптимизирован: 94 → 54 строки, @-ссылки, убрано дублирование с хуками
-  - Hook: protect-main блокирует коммиты в main/master (проверен в бою)
-- Решения: Агенты на разных моделях по сложности задачи. @-ссылки экономят контекст.
+  - Протестирован Codex через chatgpt.com — полный цикл за 1м 45с (PR #8)
+  - Собран дайджест по AI-агентам (Codex/Jules/Devin/Claude Code/Cursor/Aider)
+  - Зафиксирован паттерн "AI-корпорация" через GitHub Issues
 
-### 2026-02-22 — Финализация шаблона (сессия 2)
+### 2026-02-23 — Исследование и инициализация (сессия 2)
 - Что сделано:
-  - Hooks: check-secrets (блокирует), check-filesize (предупреждает), pre-commit-check (debug statements)
-  - Slash commands: /verify, /status, /new-project
-  - MEMORY.md для персистентной памяти между сессиями
-  - MCP: sequential-thinking, playwright (+ context7 из прошлой сессии)
-  - Git init + первый коммит (63 файла)
-  - init-project.sh — скрипт создания нового проекта из шаблона
-  - Permissions расширены: git, npm, npx, pytest, ruff, pyright и др.
-- Решения: Хуки на Python (надёжнее bash на Windows). Секреты блокируют запись, размер/debug — предупреждения.
-
-### 2026-02-22 — Настройка скиллов и инфраструктуры (сессия 1)
-- Что сделано:
-  - Создан skill-creator (глобально + в шаблоне)
-  - Создан video skill (глобально + в шаблоне)
-  - Добавлен frontend-design (официальный Anthropic, в шаблоне)
-  - Добавлен mcp-builder с reference docs (в шаблоне)
-  - Добавлен webapp-testing с Playwright примерами (в шаблоне)
-  - Установлен Node.js v24.13.1
+  - Исследован референс-воркфлоу "Персональная Корпорация"
+  - Скопирован шаблон → D:\code\2026\2\cortex
+  - PROJECT_CONTEXT.md заполнен
+  - /council и /dispatch команды созданы
+  - GitHub Apps подключены (Jules + Codex)
+  - AGENTS.md, gh CLI авторизован
+  - Первый полный цикл: Issue #2 → Jules → PR → Merge
 
 ## Технические детали
-- Архитектура: Шаблон проекта для Claude Code
-- Ключевые зависимости: Python 3.12, Node.js 24, yt-dlp, ffmpeg
+- Архитектура: CLI команды → GitHub Issues → AI агенты (Jules/Codex) → PR → Human merge
+- Стек: Python 3.12, uv, beartype, Claude Code CLI, GitHub Actions
 - Интеграции: Context7 MCP, Sequential Thinking MCP, Playwright MCP
 
+## Инвентарь
+
+### Команды (10)
+council, dispatch, heartbeat, handoff, status, verify, new-project, screenshot, tdd, build-fix, learn
+
+### Агенты (4)
+architect, code-reviewer, security-auditor, verify-agent
+
+### Хуки (8)
+check-secrets, check-filesize, pre-commit-check, protect-main, grab-screenshot, output-secret-filter, mcp-usage-tracker, expensive-tool-warning
+
+### Workflows (3)
+heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigger)
+
 ## Известные проблемы
-- Нет
+- Codex не триггерится через Issues — только через chatgpt.com вручную
+- ANTHROPIC_API_KEY не добавлен в GitHub Secrets (heartbeat cron и code-review не работают)
+- Codex плохо справляется с ресёрч/кодовыми задачами — годится для доков/шаблонов
 
 ## Прогресс
-- [x] Настройка CLAUDE.md
-- [x] Скиллы: skill-creator, video, frontend-design, mcp-builder, webapp-testing
-- [x] Установка Node.js (v24.13.1)
-- [x] MCP: context7, sequential-thinking, playwright
-- [x] Hooks: secrets, filesize, pre-commit
-- [x] Commands: /verify, /status, /new-project
-- [x] MEMORY.md
-- [x] Git init + первый коммит
-- [x] init-project.sh
-- [x] Permissions расширены
-- [x] Agents: code-reviewer, security-auditor, architect
-- [x] Command: /handoff
-- [x] .mcp.json (портабельная конфигурация)
-- [x] CLAUDE.md оптимизирован (54 строки)
-- [x] Hook: protect-main
-- [x] Issue #13: Claude Code auto-review для PR от агентов
-- [ ] Определить первый проект
+- [x] /council — AI-консилиум
+- [x] /dispatch — создание Issues с назначением агентов
+- [x] GitHub Apps (Jules + Codex)
+- [x] AGENTS.md
+- [x] gh CLI авторизован
+- [x] Первый цикл: Issue → Jules → PR → Merge
+- [x] Codex протестирован (PR #8)
+- [x] Heartbeat — авто-ресёрч трендов (HN + GitHub + Reddit)
+- [x] Auto-review PR (code-review.yml)
+- [x] Forge-port: хуки, агент, команды
+- [x] Тесты heartbeat (97% coverage)
+- [ ] ANTHROPIC_API_KEY в GitHub Secrets
+- [ ] Фриланс-бот (новый проект)
+
+## Идеи / Backlog
+- Веб-дашборд для визуализации Issues/PR pipeline
+- AutoGen AGENTS.md через DSPy
+- /quick-commit команда
+- Heartbeat v3: больше источников (Product Hunt, AI блоги)
