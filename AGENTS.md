@@ -27,8 +27,10 @@ Human                  → reviews PRs, merges
 ## Repository Structure
 
 ```
-.claude/commands/    — Claude Code slash commands (/council, /dispatch, /status)
+.claude/commands/    — Claude Code slash commands (/council, /dispatch, /heartbeat, /status)
+.github/workflows/   — GitHub Actions (heartbeat cron)
 docs/                — project documentation
+tools/heartbeat/     — AI/Tech trend scanner (HN + GitHub)
 tools/               — utility scripts
 AGENTS.md            — this file (context for AI agents)
 PROJECT_CONTEXT.md   — project goals and roadmap
