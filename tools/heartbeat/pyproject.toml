@@ -14,3 +14,9 @@ python_version = "3.12"
 [tool.pyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+]
