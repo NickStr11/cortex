@@ -36,7 +36,7 @@ def test_main_default(mock_fetch: MagicMock) -> None:
 @patch("sources.fetch_all")
 @patch("sys.stdout", new_callable=MagicMock)
 def test_cmd_fetch(mock_stdout: MagicMock, mock_fetch_all: MagicMock, mock_format: MagicMock) -> None:
-    mock_fetch_all.return_value = {"hn": [], "github": [], "reddit": [], "x": []}
+    mock_fetch_all.return_value = {"hn": [], "github": [], "reddit": [], "ph": [], "x": []}
     mock_format.return_value = "Mocked Raw Digest"
 
     cmd_fetch()
@@ -52,7 +52,7 @@ def test_cmd_fetch(mock_stdout: MagicMock, mock_fetch_all: MagicMock, mock_forma
 def test_cmd_digest(
     mock_stdout: MagicMock, mock_fetch_all: MagicMock, mock_format: MagicMock, mock_analyze: MagicMock
 ) -> None:
-    mock_fetch_all.return_value = {"hn": [], "github": [], "reddit": [], "x": []}
+    mock_fetch_all.return_value = {"hn": [], "github": [], "reddit": [], "ph": [], "x": []}
     mock_format.return_value = "Mocked Raw Digest"
     mock_analyze.return_value = "Mocked Digest Analysis"
 

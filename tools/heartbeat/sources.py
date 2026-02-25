@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -21,6 +23,8 @@ from config import (
     HN_FETCH_WORKERS,
     HN_RESULTS_LIMIT,
     HN_TOP_STORIES_LIMIT,
+    PH_FEED_URL,
+    PH_RESULTS_LIMIT,
     REDDIT_RESULTS_LIMIT,
     REDDIT_SUBREDDITS,
     X_RESULTS_LIMIT,
@@ -66,6 +70,17 @@ class XTrend:
     name: str
     url: str
     volume: int | None
+
+
+@dataclass
+class ProductHuntLaunch:
+    title: str
+    description: str
+    url: str
+    votes: int
+    comments: int
+    author: str
+    published_at: datetime
 
 
 @beartype
@@ -115,7 +130,7 @@ def fetch_x_trends() -> list[XTrend]:
 
 
 @beartype
-def _http_get_json(url: str) -> dict | list:  # type: ignore[type-arg]
+def _http_get(url: str) -> bytes:
     # Reddit and other APIs often block default Python/urllib User-Agents.
     # Using a common browser-like User-Agent to ensure better compatibility.
     req = urllib.request.Request(
@@ -129,7 +144,12 @@ def _http_get_json(url: str) -> dict | list:  # type: ignore[type-arg]
         },
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode())
+        return resp.read()
+
+
+@beartype
+def _http_get_json(url: str) -> dict | list:  # type: ignore[type-arg]
+    return json.loads(_http_get(url).decode())
 
 
 @beartype
@@ -183,6 +203,53 @@ def fetch_hn_stories() -> list[HNStory]:
 
 
 @beartype
+def fetch_product_hunt_launches() -> list[ProductHuntLaunch]:
+    try:
+        content = _http_get(PH_FEED_URL).decode()
+        root = ET.fromstring(content)
+    except Exception:
+        return []
+
+    # Atom namespace
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    launches: list[ProductHuntLaunch] = []
+
+    for entry in root.findall("atom:entry", ns):
+        title = entry.findtext("atom:title", "", ns)
+        link_elem = entry.find("atom:link[@rel='alternate']", ns)
+        url = link_elem.get("href", "") if link_elem is not None else ""
+
+        content_html = entry.findtext("atom:content", "", ns)
+        # Extract description from the first <p>
+        desc_match = re.search(r"<p>(.*?)</p>", content_html, re.DOTALL)
+        description = desc_match.group(1).strip() if desc_match else ""
+
+        author_elem = entry.find("atom:author/atom:name", ns)
+        author = author_elem.text if author_elem is not None else "unknown"
+
+        published_str = entry.findtext("atom:published", "", ns)
+        try:
+            # Format: 2026-02-24T14:37:19-08:00
+            # Python's fromisoformat handles this in 3.11+
+            published_at = datetime.fromisoformat(published_str)
+        except Exception:
+            published_at = datetime.now(timezone.utc)
+
+        if _matches_keywords(title) or _matches_keywords(description):
+            launches.append(ProductHuntLaunch(
+                title=title,
+                description=description,
+                url=url,
+                votes=0,  # RSS doesn't provide votes
+                comments=0,
+                author=author,
+                published_at=published_at,
+            ))
+
+    return launches[:PH_RESULTS_LIMIT]
+
+
+@beartype
 def fetch_github_trending() -> list[GitHubRepo]:
     cutoff = (
         datetime.now(timezone.utc) - timedelta(days=GITHUB_LOOKBACK_DAYS)
@@ -227,10 +294,13 @@ def fetch_github_trending() -> list[GitHubRepo]:
 
 
 @beartype
-def fetch_all() -> dict[str, list[HNStory] | list[GitHubRepo] | list[RedditPost] | list[XTrend]]:
+def fetch_all() -> dict[str, (
+    list[HNStory] | list[GitHubRepo] | list[RedditPost] | list[XTrend] | list[ProductHuntLaunch]
+)]:
     return {
         "hn": fetch_hn_stories(),
         "github": fetch_github_trending(),
         "reddit": fetch_reddit_posts(),
+        "ph": fetch_product_hunt_launches(),
         "x": fetch_x_trends(),
     }

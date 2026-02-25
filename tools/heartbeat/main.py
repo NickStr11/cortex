@@ -27,7 +27,7 @@ def cmd_fetch() -> None:
     print("Fetching trends...", file=sys.stderr)
     data = fetch_all()
     raw_md = format_raw_digest(
-        data["hn"], data["github"], data["reddit"], data["x"]  # type: ignore[arg-type]
+        data["hn"], data["github"], data["reddit"], data["ph"], data["x"]  # type: ignore[arg-type]
     )
     print(raw_md)
 
@@ -41,7 +41,7 @@ def cmd_digest() -> None:
     print("Fetching trends...", file=sys.stderr)
     data = fetch_all()
     raw_md = format_raw_digest(
-        data["hn"], data["github"], data["reddit"], data["x"]  # type: ignore[arg-type]
+        data["hn"], data["github"], data["reddit"], data["ph"], data["x"]  # type: ignore[arg-type]
     )
 
     print("Analyzing with Claude...", file=sys.stderr)

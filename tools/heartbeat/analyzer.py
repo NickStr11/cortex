@@ -8,7 +8,7 @@ ANALYSIS_PROMPT = """\
 You are a technology strategist for a personal AI corporation project.
 
 Given:
-1. Raw trend data from Hacker News, GitHub Trending, Reddit, and X
+1. Raw trend data from Hacker News, GitHub Trending, Reddit, Product Hunt, and X
 2. The project context (goals, stack, current status)
 
 Produce a concise Heartbeat digest in this format:
@@ -28,6 +28,7 @@ Produce a concise Heartbeat digest in this format:
 - HN stories analyzed: X
 - GitHub repos analyzed: Y
 - Reddit posts analyzed: Z
+- Product Hunt launches analyzed: P
 - X trends analyzed: W
 
 Rules:

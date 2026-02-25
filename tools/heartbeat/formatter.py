@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from beartype import beartype
 
-from sources import GitHubRepo, HNStory, RedditPost, XTrend
+from sources import GitHubRepo, HNStory, ProductHuntLaunch, RedditPost, XTrend
 
 
 @beartype
@@ -12,6 +12,7 @@ def format_raw_digest(
     hn_stories: list[HNStory],
     github_repos: list[GitHubRepo],
     reddit_posts: list[RedditPost],
+    ph_launches: list[ProductHuntLaunch],
     x_trends: list[XTrend],
 ) -> str:
     lines: list[str] = [
@@ -55,6 +56,18 @@ def format_raw_digest(
             f"(score: {post.score}, comments: {post.comments}, r/{post.subreddit})"
         )
         lines.append(f"   {post.url}")
+        lines.append("")
+
+    lines.extend([
+        f"## Product Hunt Top Launches ({len(ph_launches)} found)",
+        "",
+    ])
+
+    for i, launch in enumerate(ph_launches, 1):
+        lines.append(f"{i}. **{launch.title}** (by {launch.author})")
+        if launch.description:
+            lines.append(f"   {launch.description}")
+        lines.append(f"   {launch.url}")
         lines.append("")
 
     if x_trends:

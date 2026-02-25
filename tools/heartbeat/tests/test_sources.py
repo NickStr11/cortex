@@ -7,12 +7,15 @@ from beartype import beartype
 from sources import (
     GitHubRepo,
     HNStory,
+    ProductHuntLaunch,
     RedditPost,
+    _http_get,
     _http_get_json,
     _matches_keywords,
     fetch_all,
     fetch_github_trending,
     fetch_hn_stories,
+    fetch_product_hunt_launches,
     fetch_reddit_posts,
 )
 
@@ -126,23 +129,73 @@ def test_fetch_reddit_posts_error(mock_get: MagicMock) -> None:
 
 
 @beartype
+@patch("sources._http_get")
+def test_fetch_product_hunt_launches(mock_get: MagicMock) -> None:
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>AI Agent Tool</title>
+    <link rel="alternate" href="https://example.com/ai-agent"/>
+    <content type="html">&lt;p&gt;A cool AI agent for coding&lt;/p&gt;</content>
+    <author><name>John Doe</name></author>
+    <published>2026-02-25T12:00:00Z</published>
+  </entry>
+  <entry>
+    <title>Unrelated Product</title>
+    <link rel="alternate" href="https://example.com/unrelated"/>
+    <content type="html">&lt;p&gt;Nothing to do with AI&lt;/p&gt;</content>
+    <author><name>Jane Doe</name></author>
+    <published>2026-02-25T13:00:00Z</published>
+  </entry>
+</feed>
+"""
+    mock_get.return_value = xml_content.encode()
+
+    launches = fetch_product_hunt_launches()
+    # Only 1 launch matches keywords (AI agent)
+    assert len(launches) == 1
+    assert isinstance(launches[0], ProductHuntLaunch)
+    assert launches[0].title == "AI Agent Tool"
+    assert launches[0].author == "John Doe"
+
+
+@beartype
+@patch("sources._http_get")
+def test_fetch_product_hunt_launches_error(mock_get: MagicMock) -> None:
+    mock_get.side_effect = Exception("PH error")
+    launches = fetch_product_hunt_launches()
+    assert launches == []
+
+
+@beartype
 @patch("sources._http_get_json")
-def test_fetch_all(mock_get: MagicMock) -> None:
+@patch("sources.fetch_product_hunt_launches")
+def test_fetch_all(mock_ph: MagicMock, mock_get: MagicMock) -> None:
     mock_get.return_value = {}
+    mock_ph.return_value = []
     res = fetch_all()
     assert "hn" in res
     assert "github" in res
     assert "reddit" in res
+    assert "ph" in res
     assert "x" in res
 
 
 @beartype
 @patch("urllib.request.urlopen")
-def test_http_get_json(mock_urlopen: MagicMock) -> None:
+def test_http_get(mock_urlopen: MagicMock) -> None:
     mock_response = MagicMock()
-    mock_response.read.return_value = b'{"key": "value"}'
+    mock_response.read.return_value = b"raw data"
     mock_response.__enter__.return_value = mock_response
     mock_urlopen.return_value = mock_response
 
+    result = _http_get("http://example.com")
+    assert result == b"raw data"
+
+
+@beartype
+@patch("sources._http_get")
+def test_http_get_json(mock_get: MagicMock) -> None:
+    mock_get.return_value = b'{"key": "value"}'
     result = _http_get_json("http://example.com")
     assert result == {"key": "value"}
