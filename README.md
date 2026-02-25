@@ -111,5 +111,6 @@ Set-and-forget automation via GitHub Actions:
 
 ---
 
-## 📝 License
-This project is open-source. See individual file headers for specific licensing terms where applicable.
+## 📝 License & Contributing
+- [LICENSE](LICENSE) (MIT)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
