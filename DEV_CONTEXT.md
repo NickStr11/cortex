@@ -4,11 +4,26 @@
 - Дата: 2026-02-25
 
 ## Текущий статус
-- Этап: Feature-complete. Все milestones, DoD и задачи Jules выполнены.
-- Последнее действие: Jules закрыл все 3 задачи — /quick-commit (PR #27), /metrics (PR #28), README landing (PR #29). Все смержены.
-- Следующий шаг: Open-source launch или новый проект (фриланс-бот).
+- Этап: Feature-complete + Research phase.
+- Последнее действие: Council спринт → 4 задачи Jules (#30-33). 3/4 закрыты (metrics tests PR #35, CONTRIBUTING+LICENSE PR #34, new-project PR #36). Остался #33 (heartbeat Product Hunt).
+- Параллельно: дайджест AI Mindset (8 видео), aboutme.md (анализ дневника 4 года).
+- Следующий шаг: Дождаться Jules #33. Далее: Obsidian MCP, self-improving rules, или новый проект.
 
 ## История изменений
+
+### 2026-02-25 — Council + Research + Personal OS (сессия 7)
+- Что сделано:
+  - /council → сгенерирован спринт из 4 задач (P2-P5, P1 убран — API ключ не нужен)
+  - Задиспатчены Jules: #30 (metrics tests), #31 (CONTRIBUTING+LICENSE), #32 (new-project), #33 (heartbeat PH)
+  - Jules закрыл 3/4: PR #34 (docs), PR #35 (metrics 99% coverage), PR #36 (scaffold). #33 в работе.
+  - AI Mindset дайджест: 8 видео → research/ai-mindset-digest.md (закоммичен)
+  - Анализ дневника: 603 записи Obsidian (2022-2026) → aboutme.md (Personal OS foundation)
+  - Обсуждение: Obsidian как инфраструктура для AI-агентов (skills, rules, MCP)
+  - Personal OS setup: структура AI/ в Obsidian vault (aboutme, rules, skills, knowledge)
+  - Симлинки ~/.claude/ → Obsidian vault (aboutme.md, ai-rules/, ai-knowledge/)
+  - Глобальный ~/.claude/CLAUDE.md создан — ссылается на aboutme + rules + knowledge
+  - Философия в aboutme.md дополнена: эволюция мировоззрения (стоицизм → тёмный поворот → детерминизм), ключевые авторы, главное противоречие
+- Решения: ANTHROPIC_API_KEY не нужен. Personal OS v1 настроен — Obsidian = single source of truth через симлинки.
 
 ### 2026-02-25 — Sync + финализация (сессия 6)
 - Что сделано:
@@ -76,8 +91,8 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 
 ## Известные проблемы
 - Codex не триггерится через Issues — только через chatgpt.com вручную
-- ANTHROPIC_API_KEY не добавлен в GitHub Secrets (heartbeat cron и code-review не работают)
 - Codex плохо справляется с ресёрч/кодовыми задачами — годится для доков/шаблонов
+- tools/video/extract.py: баг — хардкодит output dir для URL (workaround: --output flag)
 
 ## Прогресс
 - [x] /council — AI-консилиум
@@ -94,14 +109,22 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] DEV_CONTEXT.md и PROJECT_CONTEXT.md синхронизированы
 - [x] Все milestones и DoD выполнены
 - [x] Stale Issues закрыты (#7, #10, #13)
-- [ ] ANTHROPIC_API_KEY в GitHub Secrets
 - [x] /quick-commit команда (PR #27, Jules)
 - [x] /metrics — трекинг агентов (PR #28, Jules)
 - [x] README как landing page (PR #29, Jules)
+- [x] Metrics tests 99% coverage (PR #35, Jules)
+- [x] CONTRIBUTING.md + LICENSE (PR #34, Jules)
+- [x] /new-project scaffold (PR #36, Jules)
+- [ ] Heartbeat + Product Hunt (#33, Jules — в работе)
+- [x] AI Mindset дайджест (research/ai-mindset-digest.md)
+- [x] aboutme.md — персональный контекст (Obsidian vault)
+- [x] Personal OS v1: Obsidian vault → симлинки → ~/.claude/ (aboutme, rules, knowledge)
 - [ ] Фриланс-бот (новый проект)
 
 ## Идеи / Backlog
+- Personal OS v2: Obsidian MCP (поиск по vault в реальном времени)
+- Self-improving rules (агент пишет новые правила при ошибках)
+- Triage/judge агент (фильтр качества контента)
+- Obsidian MCP для Claude Code
 - Веб-дашборд для визуализации Issues/PR pipeline
-- AutoGen AGENTS.md через DSPy
-- Heartbeat v3: больше источников (Product Hunt, AI блоги)
 - Open-source launch: r/ClaudeAI, Show HN
