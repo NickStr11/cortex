@@ -11,6 +11,14 @@
 
 ## История изменений
 
+### 2026-02-26 — Research Agent-Reach (сессия 8)
+- Что сделано:
+  - Исследован проект Agent-Reach (1.7k stars)
+  - Проведен анализ "Zero API fees" — подтверждено (скрейпинг, cookies, free tiers)
+  - Сравнение с Heartbeat Fetch: Cortex легковесен, Agent-Reach избыточен по зависимостям
+  - Вердикт: Полная замена нецелесообразна, рекомендована точечная интеграция (Jina Reader, bird CLI)
+  - Отчет: research/agent-reach-analysis.md
+
 ### 2026-02-25 — Council + Research + Personal OS (сессия 7)
 - Что сделано:
   - /council → сгенерирован спринт из 4 задач (P2-P5, P1 убран — API ключ не нужен)
@@ -116,6 +124,7 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] CONTRIBUTING.md + LICENSE (PR #34, Jules)
 - [x] /new-project scaffold (PR #36, Jules)
 - [ ] Heartbeat + Product Hunt (#33, Jules — в работе)
+- [x] Research: Agent-Reach (research/agent-reach-analysis.md)
 - [x] AI Mindset дайджест (research/ai-mindset-digest.md)
 - [x] aboutme.md — персональный контекст (Obsidian vault)
 - [x] Personal OS v1: Obsidian vault → симлинки → ~/.claude/ (aboutme, rules, knowledge)
