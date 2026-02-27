@@ -1,23 +1,45 @@
 # Development Context Log
 
 ## Последнее обновление
-- Дата: 2026-02-25
+- Дата: 2026-02-27
 
 ## Текущий статус
-- Этап: Feature-complete + Research phase.
-- Последнее действие: Council спринт → 4 задачи Jules (#30-33). 3/4 закрыты (metrics tests PR #35, CONTRIBUTING+LICENSE PR #34, new-project PR #36). Остался #33 (heartbeat Product Hunt).
-- Параллельно: дайджест AI Mindset (8 видео), aboutme.md (анализ дневника 4 года).
-- Следующий шаг: Дождаться Jules #33. Далее: Obsidian MCP, self-improving rules, или новый проект.
+- Этап: Feature-complete + новый вектор — контент-пайплайн + Google Cloud VM.
+- Последнее действие: dotfiles-claude репо, Google Cloud VM, Telegram бот, анализ AI Mindset видео.
+- Текущий фокус: пайплайн сессии → статья → Telegram канал. Ожидание экспорта Telegram канала с заметками.
+- Следующий шаг: получить экспорт @cipher_think_bot канала → проанализировать заметки/аудио → написать пайплайн генерации статей → задеплоить на VM.
 
 ## История изменений
 
-### 2026-02-26 — Research Agent-Reach (сессия 8)
+### 2026-02-27 — Personal OS v2 + Google Cloud VM + контент-пайплайн (сессия 9)
 - Что сделано:
-  - Исследован проект Agent-Reach (1.7k stars)
-  - Проведен анализ "Zero API fees" — подтверждено (скрейпинг, cookies, free tiers)
-  - Сравнение с Heartbeat Fetch: Cortex легковесен, Agent-Reach избыточен по зависимостям
-  - Вердикт: Полная замена нецелесообразна, рекомендована точечная интеграция (Jina Reader, bird CLI)
+  - Разбор двух AI Mindset видео (Founder OS #22 + POS sprint) — полный анализ субтитров через субагентов
+  - Эксперимент: статья из логов сессии 8 ("Как я проверил свой AI-проект на уникальность") — получилось читабельно
+  - dotfiles-claude: приватный GitHub репо с настройками ~/.claude/ (CLAUDE.md, aboutme.md, ai-rules, skills, memory)
+  - Хук sync-memory.py: MEMORY.md автоматически пушится в dotfiles-claude при завершении сессии
+  - Хук pull-dotfiles.py: автопулл dotfiles при старте сессии (1 раз в день)
+  - setup.sh: одна команда разворачивает всё на новом компе
+  - Google Cloud VM: cortex-vm (e2-small, europe-west3-b, Ubuntu 22.04, IP 34.159.55.61)
+  - Cortex склонирован на VM, Python + git установлены
+  - Telegram бот @cipher_think_bot подключён к приватному каналу (chat_id: -1001434709177)
+  - Токен и chat_id сохранены в .env на VM
+- Решения: контент-пайплайн (сессия → статья → Telegram) — следующий конкретный шаг. Нужен Anthropic API ключ на VM.
+- Ожидание: экспорт Telegram канала с личными заметками и аудио для анализа.
+
+### 2026-02-26 — Reality check + cleanup + Research Agent-Reach (сессия 8)
+- Что сделано:
+  - idea-reality MCP подключен и протестирован (добавлен в прошлой сессии, заработал после рестарта)
+  - Cortex reality check: signal 74/100, прямой конкурент Atman36/personal-assist-orchestrator (0 stars, macOS-only, 1 день работы). Cortex объективно зрелее.
+  - Детальное сравнение Cortex vs pcorp: мы — CLI toolkit (cloud-first, cross-platform), они — standalone daemon (macOS, SQLite state)
+  - #38 (Remote Control API) — исследовано, закрыто. Это remote desktop для CLI, не API для оркестрации. Dispatch через Issues остаётся.
+  - #42 (idea-reality MCP) — закрыто, проверка пройдена.
+  - Cipher (OpenClaw агент на VPS 89.19.208.38) — ревью: мёртвый проект, Docker не запущен, workspace-свалка. Всё полезное уже в Cortex.
+  - cipher-knowledge репа — уже в архиве на GitHub.
+  - VPS Timeweb — решено удалить (не выполняет функций, деньги списываются).
+  - Исследован проект Agent-Reach (1.7k stars): Zero API fees подтверждено (скрейпинг, cookies, free tiers)
+  - Вердикт по Agent-Reach: полная замена нецелесообразна, точечная интеграция (Jina Reader, bird CLI)
   - Отчет: research/agent-reach-analysis.md
+- Решения: Открытых Issues — 0. Cipher закрыт, VPS удаляется. Cortex — единственный активный проект.
 
 ### 2026-02-25 — Council + Research + Personal OS (сессия 7)
 - Что сделано:
@@ -81,7 +103,7 @@
 ## Технические детали
 - Архитектура: CLI команды → GitHub Issues → AI агенты (Jules/Codex) → PR → Human merge
 - Стек: Python 3.12, uv, beartype, Claude Code CLI, GitHub Actions
-- Интеграции: Context7 MCP, Sequential Thinking MCP, Playwright MCP
+- Интеграции: Context7 MCP, Sequential Thinking MCP, Playwright MCP, idea-reality MCP, Codex CLI MCP
 
 ## Инвентарь
 
@@ -123,17 +145,25 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] Metrics tests 99% coverage (PR #35, Jules)
 - [x] CONTRIBUTING.md + LICENSE (PR #34, Jules)
 - [x] /new-project scaffold (PR #36, Jules)
-- [ ] Heartbeat + Product Hunt (#33, Jules — в работе)
+- [x] Heartbeat + Product Hunt (#33, Jules)
 - [x] Research: Agent-Reach (research/agent-reach-analysis.md)
 - [x] AI Mindset дайджест (research/ai-mindset-digest.md)
 - [x] aboutme.md — персональный контекст (Obsidian vault)
 - [x] Personal OS v1: Obsidian vault → симлинки → ~/.claude/ (aboutme, rules, knowledge)
-- [ ] Фриланс-бот (новый проект)
+- [x] idea-reality MCP — pre-build проверка идей на уникальность
+- [x] Cortex reality check (signal 74, конкурент слабее)
+- [x] #38 Remote Control API — исследовано, не подходит для dispatch
+- [x] Cipher cleanup — репа в архиве, VPS удаляется
+- [x] dotfiles-claude — приватный репо, автосинк памяти между компами
+- [x] Google Cloud VM (cortex-vm, e2-small, 34.159.55.61) — задеплоен, Cortex склонирован
+- [x] Telegram бот подключён к приватному каналу (chat_id: -1001434709177)
+- [ ] Контент-пайплайн: сессия → статья → Telegram (в процессе)
+- [ ] Анализ экспорта Telegram канала (заметки + аудио)
+- [ ] ~~Фриланс-бот~~ (отложен)
 
 ## Идеи / Backlog
+- Контент-пайплайн: DEV_CONTEXT → статья через Claude API → Telegram канал (приватный → потом публичный)
 - Personal OS v2: Obsidian MCP (поиск по vault в реальном времени)
 - Self-improving rules (агент пишет новые правила при ошибках)
-- Triage/judge агент (фильтр качества контента)
-- Obsidian MCP для Claude Code
 - Веб-дашборд для визуализации Issues/PR pipeline
 - Open-source launch: r/ClaudeAI, Show HN
