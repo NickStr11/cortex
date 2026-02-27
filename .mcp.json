@@ -14,6 +14,11 @@
       "type": "stdio",
       "command": "cmd",
       "args": ["/c", "npx", "-y", "@playwright/mcp@latest"]
+    },
+    "idea-reality": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["idea-reality-mcp"]
     }
   }
 }
