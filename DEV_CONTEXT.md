@@ -1,15 +1,29 @@
 # Development Context Log
 
 ## Последнее обновление
-- Дата: 2026-02-27
+- Дата: 2026-02-28
 
 ## Текущий статус
-- Этап: Feature-complete + новый вектор — контент-пайплайн + Google Cloud VM.
-- Последнее действие: dotfiles-claude репо, Google Cloud VM, Telegram бот, анализ AI Mindset видео.
-- Текущий фокус: пайплайн сессии → статья → Telegram канал. Ожидание экспорта Telegram канала с заметками.
-- Следующий шаг: получить экспорт @cipher_think_bot канала → проанализировать заметки/аудио → написать пайплайн генерации статей → задеплоить на VM.
+- Этап: Контент-пайплайн запущен и работает в продакшне.
+- Последнее действие: tools/pipeline написан (Gemini 3 Flash), задеплоен через GitHub Actions, протестирован — посты летят в Telegram.
+- Текущий фокус: пайплайн работает автоматически (merge DEV_CONTEXT → пост). VM пока не задействована для пайплайна.
+- Следующий шаг: получить экспорт Telegram канала (заметки + аудио) → анализ → обогащение контекста.
 
 ## История изменений
+
+### 2026-02-28 — Контент-пайплайн запущен (сессия 10)
+- Что сделано:
+  - PR #46 смержен (сессия 9 docs), разрешены конфликты с Agent-Reach из main
+  - tools/pipeline/main.py — написан пайплайн DEV_CONTEXT → Gemini 3 Flash → Telegram
+  - Gemini 3 Flash (gemini-3-flash-preview) — заменил Anthropic API (ключа нет)
+  - GitHub Actions pipeline.yml — триггер на push DEV_CONTEXT.md в main
+  - GitHub Secrets: GOOGLE_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+  - Пайплайн протестирован локально и через Actions — посты уходят в канал
+  - Гайд "Новый комп за 5 минут" отправлен в Telegram (message_id=830)
+  - Разобрались что VM нужна только для 24/7 бота, для пайплайна — не нужна
+  - Изучили подход Серёжи Риса (sereja.tech) — публичный блог Hugo+Vercel, 82 статьи
+- Решения: GitHub Actions > VM cron для пайплайна. GOOGLE_API_KEY вместо ANTHROPIC_API_KEY.
+- Ключи в чате засвечены — перегенерить GOOGLE_API_KEY и TELEGRAM_BOT_TOKEN.
 
 ### 2026-02-27 — Personal OS v2 + Google Cloud VM + контент-пайплайн (сессия 9)
 - Что сделано:
@@ -116,8 +130,8 @@ architect, code-reviewer, security-auditor, verify-agent
 ### Хуки (8)
 check-secrets, check-filesize, pre-commit-check, protect-main, grab-screenshot, output-secret-filter, mcp-usage-tracker, expensive-tool-warning
 
-### Workflows (3)
-heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigger)
+### Workflows (4)
+heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigger), pipeline.yml (DEV_CONTEXT → Telegram)
 
 ## Известные проблемы
 - Codex не триггерится через Issues — только через chatgpt.com вручную
@@ -157,7 +171,8 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] dotfiles-claude — приватный репо, автосинк памяти между компами
 - [x] Google Cloud VM (cortex-vm, e2-small, 34.159.55.61) — задеплоен, Cortex склонирован
 - [x] Telegram бот подключён к приватному каналу (chat_id: -1001434709177)
-- [ ] Контент-пайплайн: сессия → статья → Telegram (в процессе)
+- [x] Контент-пайплайн: DEV_CONTEXT → Gemini 3 Flash → Telegram (PR #47, pipeline.yml)
+- [ ] Перегенерить GOOGLE_API_KEY и TELEGRAM_BOT_TOKEN (засвечены в чате)
 - [ ] Анализ экспорта Telegram канала (заметки + аудио)
 - [ ] ~~Фриланс-бот~~ (отложен)
 
