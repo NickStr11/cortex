@@ -5,7 +5,7 @@ Usage:
     uv run python tools/pipeline/main.py --dry-run   # print article, don't send
 
 Requires:
-    ANTHROPIC_API_KEY
+    GOOGLE_API_KEY
     TELEGRAM_BOT_TOKEN
     TELEGRAM_CHAT_ID
 """
@@ -16,12 +16,14 @@ import re
 import sys
 from pathlib import Path
 
-import anthropic
 import httpx
 from beartype import beartype
+from google import genai
 
 ROOT = Path(__file__).parent.parent.parent
 DEV_CONTEXT = ROOT / "DEV_CONTEXT.md"
+
+MODEL = "gemini-3-flash-preview"
 
 WRITING_STYLE = """Ты помогаешь писать короткие посты для Telegram-канала на основе логов разработки.
 
@@ -70,26 +72,15 @@ def extract_last_session(dev_context: str) -> str:
 
 @beartype
 def generate_article(session_log: str) -> str:
-    """Generate Telegram post from session log using Claude API."""
-    client = anthropic.Anthropic()
+    """Generate Telegram post from session log using Gemini API."""
+    client = genai.Client()
 
-    with client.messages.stream(
-        model="claude-haiku-4-5",
-        max_tokens=1024,
-        system=WRITING_STYLE,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Напиши пост для Telegram-канала на основе этого лога сессии разработки.\n\n"
-                    f"{session_log}"
-                ),
-            }
-        ],
-    ) as stream:
-        final = stream.get_final_message()
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=f"{WRITING_STYLE}\n\nНапиши пост для Telegram-канала на основе этого лога сессии разработки.\n\n{session_log}",
+    )
 
-    return final.content[0].text  # type: ignore[union-attr]
+    return response.text  # type: ignore[return-value]
 
 
 @beartype
@@ -110,7 +101,10 @@ def send_to_telegram(text: str, token: str, chat_id: str) -> int:
 def main() -> None:
     dry_run = "--dry-run" in sys.argv
 
-    # Check env vars early
+    if not os.environ.get("GOOGLE_API_KEY"):
+        print("Error: GOOGLE_API_KEY required", file=sys.stderr)
+        sys.exit(1)
+
     if not dry_run:
         token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
         chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -120,10 +114,6 @@ def main() -> None:
     else:
         token, chat_id = "", ""
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("Error: ANTHROPIC_API_KEY required", file=sys.stderr)
-        sys.exit(1)
-
     # Read and parse
     text = DEV_CONTEXT.read_text(encoding="utf-8")
     last_session = extract_last_session(text)
@@ -132,7 +122,7 @@ def main() -> None:
     print(f"Session: {title_line}")
 
     # Generate
-    print("Generating article...")
+    print(f"Generating via {MODEL}...")
     article = generate_article(last_session)
 
     print(f"\n{'='*50}\n{article}\n{'='*50}\n")
