@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from beartype import beartype
 
 from formatter import format_raw_digest
-from sources import GitHubRepo, HNStory, RedditPost, XTrend
+from sources import GitHubRepo, HNStory, ProductHuntLaunch, RedditPost, XTrend
 
 
 @beartype
@@ -47,8 +47,21 @@ def test_format_raw_digest() -> None:
     x_trends = [
         XTrend(name="Trend", url="http://x.com/trend", volume=1000)
     ]
+    ph_launches = [
+        ProductHuntLaunch(
+            title="PH Launch",
+            description="desc",
+            url="http://ph.com",
+            votes=100,
+            comments=10,
+            author="author",
+            published_at=datetime.now(timezone.utc),
+        )
+    ]
 
-    digest = format_raw_digest(hn_stories, github_repos, reddit_posts, x_trends)
+    digest = format_raw_digest(
+        hn_stories, github_repos, reddit_posts, ph_launches, x_trends
+    )
 
     assert "Heartbeat Raw Data" in digest
     assert "Hacker News Top Stories (1 relevant)" in digest
@@ -57,5 +70,7 @@ def test_format_raw_digest() -> None:
     assert "org/repo" in digest
     assert "Reddit Top Posts (1 found)" in digest
     assert "Reddit Post" in digest
+    assert "Product Hunt Top Launches (1 found)" in digest
+    assert "PH Launch" in digest
     assert "X Trending Topics (1 found)" in digest
     assert "Trend" in digest

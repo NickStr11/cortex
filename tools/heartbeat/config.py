@@ -48,6 +48,10 @@ GITHUB_RESULTS_LIMIT = 15
 REDDIT_SUBREDDITS = ["MachineLearning", "artificial", "LocalLLaMA", "ChatGPT"]
 REDDIT_RESULTS_LIMIT = 20
 
+# Product Hunt
+PH_FEED_URL = "https://www.producthunt.com/feed"
+PH_RESULTS_LIMIT = 5
+
 # X (Twitter)
 X_RESULTS_LIMIT = 10
 

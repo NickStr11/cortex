@@ -26,7 +26,7 @@
 - Решения: контент-пайплайн (сессия → статья → Telegram) — следующий конкретный шаг. Нужен Anthropic API ключ на VM.
 - Ожидание: экспорт Telegram канала с личными заметками и аудио для анализа.
 
-### 2026-02-26 — Reality check + cleanup (сессия 8)
+### 2026-02-26 — Reality check + cleanup + Research Agent-Reach (сессия 8)
 - Что сделано:
   - idea-reality MCP подключен и протестирован (добавлен в прошлой сессии, заработал после рестарта)
   - Cortex reality check: signal 74/100, прямой конкурент Atman36/personal-assist-orchestrator (0 stars, macOS-only, 1 день работы). Cortex объективно зрелее.
@@ -36,6 +36,9 @@
   - Cipher (OpenClaw агент на VPS 89.19.208.38) — ревью: мёртвый проект, Docker не запущен, workspace-свалка. Всё полезное уже в Cortex.
   - cipher-knowledge репа — уже в архиве на GitHub.
   - VPS Timeweb — решено удалить (не выполняет функций, деньги списываются).
+  - Исследован проект Agent-Reach (1.7k stars): Zero API fees подтверждено (скрейпинг, cookies, free tiers)
+  - Вердикт по Agent-Reach: полная замена нецелесообразна, точечная интеграция (Jina Reader, bird CLI)
+  - Отчет: research/agent-reach-analysis.md
 - Решения: Открытых Issues — 0. Cipher закрыт, VPS удаляется. Cortex — единственный активный проект.
 
 ### 2026-02-25 — Council + Research + Personal OS (сессия 7)
@@ -143,6 +146,7 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] CONTRIBUTING.md + LICENSE (PR #34, Jules)
 - [x] /new-project scaffold (PR #36, Jules)
 - [x] Heartbeat + Product Hunt (#33, Jules)
+- [x] Research: Agent-Reach (research/agent-reach-analysis.md)
 - [x] AI Mindset дайджест (research/ai-mindset-digest.md)
 - [x] aboutme.md — персональный контекст (Obsidian vault)
 - [x] Personal OS v1: Obsidian vault → симлинки → ~/.claude/ (aboutme, rules, knowledge)
