@@ -11,10 +11,15 @@ Requires:
 """
 from __future__ import annotations
 
+import io
 import os
 import re
 import sys
 from pathlib import Path
+
+# Windows console fix
+if sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 import httpx
 from beartype import beartype
