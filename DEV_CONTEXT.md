@@ -4,12 +4,23 @@
 - Дата: 2026-03-01
 
 ## Текущий статус
-- Этап: TG Monitor полностью работает в продакшне. Автоматические дайджесты по расписанию.
-- Последнее действие: сессия 12 — Telethon авторизован (QR), дайджесты генерируются через Gemini, отправляются как .md файлы в канал.
-- Текущий фокус: автоматизация работает, ежедневные дайджесты в 06:00 MSK.
+- Этап: TG Bridge — Telegram → Claude Code бридж работает.
+- Последнее действие: сессия 13 — tg-bridge написан и протестирован, dotfiles-claude синкнут.
+- Текущий фокус: tg-bridge (управление Claude Code с телефона через Telegram бота).
 - Следующий шаг: анализ экспорта Telegram канала (заметки + аудио).
 
 ## История изменений
+
+### 2026-03-01 — TG Bridge + SVG эксперименты (сессия 13)
+- Что сделано:
+  - tools/tg-bridge/main.py — Telegram → Claude Code бридж через long polling
+  - Бот @cipher_think_bot принимает сообщения, прокидывает в `claude -p`, возвращает ответ
+  - Whitelist по user_id (691773226), история 20 сообщений (history.json), /new для сброса
+  - Фиксы: Windows encoding (PYTHONIOENCODING=utf-8), nested session (unset CLAUDECODE env)
+  - dotfiles-claude синкнут с текущим ~/.claude/ (aboutme, ai-knowledge обновлены, push)
+  - Эксперимент: image → SVG конвертация (vtracer, Inkscape CLI trace). Inkscape 64-scan лучший результат для сложных лого, но автотулы не тянут разбивку на семантические объекты
+  - Inkscape установлен через winget (1.4.3)
+- Решения: `claude -p` без `--continue` (конфликтует с интерактивной сессией), вместо этого ручная history.json. Автоматический трейсинг упирается в потолок на сложных иллюстрациях — нужен Gemini 3.1 Pro или ручная работа.
 
 ### 2026-03-01 — Telethon авторизован + дайджесты в продакшне (сессия 12)
 - Что сделано:
@@ -144,6 +155,7 @@
 - Архитектура: CLI команды → GitHub Issues → AI агенты (Jules/Codex) → PR → Human merge
 - Стек: Python 3.12, uv, beartype, Claude Code CLI, GitHub Actions
 - Интеграции: Context7 MCP, Sequential Thinking MCP, Playwright MCP, idea-reality MCP, Codex CLI MCP
+- Inkscape 1.4.3 установлен (winget), доступен для CLI trace bitmap
 
 ## Инвентарь
 
@@ -156,8 +168,8 @@ architect, code-reviewer, security-auditor, verify-agent
 ### Хуки (8)
 check-secrets, check-filesize, pre-commit-check, protect-main, grab-screenshot, output-secret-filter, mcp-usage-tracker, expensive-tool-warning
 
-### Tools (3)
-heartbeat (HN/Reddit/GitHub trends), pipeline (DEV_CONTEXT → article → Telegram), tg-monitor (TG groups → digest → Telegram)
+### Tools (4)
+heartbeat (HN/Reddit/GitHub trends), pipeline (DEV_CONTEXT → article → Telegram), tg-monitor (TG groups → digest → Telegram), tg-bridge (Telegram → Claude Code bridge)
 
 ### Workflows (4)
 heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigger), pipeline.yml (DEV_CONTEXT → Telegram)
@@ -206,6 +218,8 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] Telethon авторизован (QR), сессия на VM, дайджесты работают
 - [x] GOOGLE_API_KEY обновлён
 - [x] /tg-digest скилл
+- [x] TG Bridge: Telegram → Claude Code через @cipher_think_bot (tools/tg-bridge/)
+- [x] dotfiles-claude синкнут с текущим состоянием
 - [ ] Перегенерить TELEGRAM_BOT_TOKEN (засвечен в чате)
 - [ ] Анализ экспорта Telegram канала (заметки + аудио)
 - [ ] ~~Фриланс-бот~~ (отложен)
