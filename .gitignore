@@ -62,3 +62,6 @@ tg/
 # TG Monitor data (messages JSON + Telethon session)
 data/tg-groups/
 *.session
+
+# TG Bridge history
+tools/tg-bridge/history.json
