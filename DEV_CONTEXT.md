@@ -1,15 +1,41 @@
 # Development Context Log
 
 ## Последнее обновление
-- Дата: 2026-02-28
+- Дата: 2026-03-01
 
 ## Текущий статус
-- Этап: Контент-пайплайн запущен и работает в продакшне.
-- Последнее действие: tools/pipeline написан (Gemini 3 Flash), задеплоен через GitHub Actions, протестирован — посты летят в Telegram.
-- Текущий фокус: пайплайн работает автоматически (merge DEV_CONTEXT → пост). VM пока не задействована для пайплайна.
-- Следующий шаг: получить экспорт Telegram канала (заметки + аудио) → анализ → обогащение контекста.
+- Этап: TG Monitor полностью работает в продакшне. Автоматические дайджесты по расписанию.
+- Последнее действие: сессия 12 — Telethon авторизован (QR), дайджесты генерируются через Gemini, отправляются как .md файлы в канал.
+- Текущий фокус: автоматизация работает, ежедневные дайджесты в 06:00 MSK.
+- Следующий шаг: анализ экспорта Telegram канала (заметки + аудио).
 
 ## История изменений
+
+### 2026-03-01 — Telethon авторизован + дайджесты в продакшне (сессия 12)
+- Что сделано:
+  - Telethon авторизован через QR-код (из PowerShell пользователя). Блокер решён!
+  - Сессия cortex_userbot.session создана и загружена на VM
+  - Первый дайджест vibecod3rs: 1494 сообщения → Claude субагент (GOOGLE_API_KEY был просрочен)
+  - Новый GOOGLE_API_KEY получен, Gemini digest работает
+  - /tg-digest скилл создан (Telethon fetch → Gemini analysis → .md в канал)
+  - Группа Вайбкодеры добавлена в config.py (vibecod3rs)
+  - AI Mindset: username не работал → заменён на числовой ID (-1001497220445)
+  - digest.py/daily.py: дайджест отправляется как .md файл (sendDocument), не текстом
+  - Systemd timer: 03:00 UTC (06:00 MSK), обе группы фетчатся
+  - VM: .env почищен от комментариев, все файлы синхронизированы
+  - PharmOrder: улучшен поиск (multi-word fallback: "нурофен леди" → "Нурофен экспресс леди")
+  - Создан .docx с заявкой для аптеки, отправлен маме в TG
+- Решения: QR-авторизация > код (коды Telegram не доставлялись). Gemini > Claude для дайджестов (экономия токенов). .md файл > текст (нет лимита 4096 символов).
+
+### 2026-03-01 — TG Monitor написан (сессия 11)
+- Что сделано:
+  - tools/tg-monitor/monitor.py — Telethon userbot, читает сообщения из TG-групп, сохраняет в JSON
+  - tools/tg-monitor/digest.py — дайджест через Gemini, отправка в Telegram
+  - tools/tg-monitor/config.py — список групп, фильтры по длине и ключевым словам
+  - tools/tg-monitor/daily.py — объединяет heartbeat + tg-monitor в один запуск
+  - tools/tg-monitor/deploy/ — systemd service + timer + setup-vm.sh
+  - .gitignore обновлён — data/tg-groups/ и *.session исключены
+- Блокер: Telethon auth — коды не приходили (решён в сессии 12 через QR).
 
 ### 2026-02-28 — Контент-пайплайн запущен (сессия 10)
 - Что сделано:
@@ -121,14 +147,17 @@
 
 ## Инвентарь
 
-### Команды (12)
-council, dispatch, heartbeat, handoff, status, verify, new-project, screenshot, tdd, build-fix, learn, quick-commit, metrics
+### Команды (14)
+council, dispatch, heartbeat, handoff, status, verify, new-project, screenshot, tdd, build-fix, learn, quick-commit, metrics, tg-digest, daily
 
 ### Агенты (4)
 architect, code-reviewer, security-auditor, verify-agent
 
 ### Хуки (8)
 check-secrets, check-filesize, pre-commit-check, protect-main, grab-screenshot, output-secret-filter, mcp-usage-tracker, expensive-tool-warning
+
+### Tools (3)
+heartbeat (HN/Reddit/GitHub trends), pipeline (DEV_CONTEXT → article → Telegram), tg-monitor (TG groups → digest → Telegram)
 
 ### Workflows (4)
 heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigger), pipeline.yml (DEV_CONTEXT → Telegram)
@@ -172,7 +201,12 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] Google Cloud VM (cortex-vm, e2-small, 34.159.55.61) — задеплоен, Cortex склонирован
 - [x] Telegram бот подключён к приватному каналу (chat_id: -1001434709177)
 - [x] Контент-пайплайн: DEV_CONTEXT → Gemini 3 Flash → Telegram (PR #47, pipeline.yml)
-- [ ] Перегенерить GOOGLE_API_KEY и TELEGRAM_BOT_TOKEN (засвечены в чате)
+- [x] TG Monitor: Telethon userbot + Gemini digest + daily runner (tools/tg-monitor/)
+- [x] Systemd timer для daily digest на VM (deploy/cortex-daily.timer)
+- [x] Telethon авторизован (QR), сессия на VM, дайджесты работают
+- [x] GOOGLE_API_KEY обновлён
+- [x] /tg-digest скилл
+- [ ] Перегенерить TELEGRAM_BOT_TOKEN (засвечен в чате)
 - [ ] Анализ экспорта Telegram канала (заметки + аудио)
 - [ ] ~~Фриланс-бот~~ (отложен)
 
