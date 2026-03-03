@@ -1,15 +1,91 @@
 # Development Context Log
 
 ## Последнее обновление
-- Дата: 2026-03-01
+- Дата: 2026-03-03
 
 ## Текущий статус
-- Этап: TG Bridge — Telegram → Claude Code бридж работает.
-- Последнее действие: сессия 13 — tg-bridge написан и протестирован, dotfiles-claude синкнут.
-- Текущий фокус: tg-bridge (управление Claude Code с телефона через Telegram бота).
-- Следующий шаг: анализ экспорта Telegram канала (заметки + аудио).
+- Этап: PharmOrder VPS — delta sync + shared scan items готовы, работают в продакшне.
+- Последнее действие: сессия 18 — delta sync (HTTP, без SFTP), shared scan items (server-side вместо localStorage), мультикомп экосистема.
+- Текущий фокус: завтра принести sklit_sync на кассовый комп, единая экосистема.
+- Следующий шаг: тест на кассовом ПК, остатки, неизвестные товары (ЧЗ или ручная привязка).
 
 ## История изменений
+
+### 2026-03-03 — Delta sync + shared scan items (сессия 18)
+- Что сделано:
+  - **Delta sync**: полная переработка загрузки прайсов. Вместо 89MB полного дампа — только изменения (set-based diff). Первый запуск сохраняет snapshot, последующие шлют дельту (upserts + deletes). Payload gzip-ится при >512KB.
+  - **Удалён paramiko/SFTP**: загрузка прайсов теперь HTTP-only (`POST /api/sync/prices-delta`). Зависимость `paramiko` убрана из sync.bat.
+  - **`--upload` флаг**: принудительная полная загрузка БД, если нужен ресет.
+  - **Мультикомп синк**: протестировано на домашнем ПК (184926 продуктов) + мамин ноутбук (184601 продуктов). Дельты работают — "Без изменений" при повторном запуске.
+  - **First-run логика**: новый ПК только сохраняет snapshot, НЕ загружает полный прайс (VPS уже имеет данные от другого ПК).
+  - **Shared scan items**: scanItems переехали из localStorage в server-side storage. `GET/POST /api/scan-items` + polling каждые 3 сек. Коды видны на всех компах в реальном времени.
+  - **sync.bat фикс**: URL теперь включает API key (`?key=...`) для автоматической авторизации.
+  - **Баг дубликатов**: SQL JOIN-based delta давал потери (~18K продуктов). Исправлено на set-based comparison (Python sets полных кортежей).
+- Файлы: server.py (delta endpoint + scan-items API), index.html (server sync вместо localStorage), sync_standalone.py (delta sync), sync.bat (убран paramiko)
+- Архитектура: любой ПК может загрузить дельту прайсов, VPS — single source of truth, scan items общие для всех браузеров.
+
+### 2026-03-02 — Standalone sync client + Context Mode MCP (сессия 17)
+- Что сделано:
+  - **Context Mode MCP установлен**: `claude mcp add context-mode -- npx -y context-mode`. Сжимает выход тулов на 98% (56KB→299B), сессии живут значительно дольше. Работает через batch_execute, execute, index, search, fetch_and_index.
+  - **Диагностика**: sync_standalone.py (в sklit_sync.zip) не загружал прайсы на VPS — только забирал заявки. Поэтому счётчик не обновлялся.
+  - **Фикс sync_standalone.py**: дописан полный двусторонний синк (~420 строк, zero deps на проект):
+    - `sync_prices()`: watch pr_all.dbf mtime → convert() DBF→SQLite+FTS → upload на VPS
+    - `pull_and_write()`: poll VPS → zayava.DBF (было и раньше)
+    - Встроены: `convert()`, `_build_supplier_map()`, `_read_apteks()`, supplier map, apteks meta
+  - Архив `sklit_sync.zip` пересобран на рабочем столе
+  - Протестировано на домашнем ПК — прайсы загрузились на VPS
+  - **VPS.md** обновлён: два варианта запуска, настройка на чистом ПК, таблица диагностики
+  - План автозагрузки: `.pyw` + `shell:startup` или Task Scheduler
+- Файлы: sync_standalone.py (обновлён), sync.bat (обновлён), VPS.md (обновлён)
+
+### 2026-03-02 — PharmOrder VPS полировка (сессия 16)
+- Что сделано:
+  - **Sync-статус в header**: `GET /api/sync/status` — зелёная/жёлтая/красная точка + возраст базы, pending exports count
+  - Sync-индикатор поллит каждые 30 сек, VPS only (в local mode скрыт)
+  - Кнопка "Обновить прайсы" скрывается в VPS mode (sync_client обновляет)
+  - **Поиск фикс**: contains-match вместо starts-with only. "цитрал" теперь находит и "Цитралгин" и "Гель цитралгин флебогель". Starts-with идут первыми в сортировке.
+  - **Фильтр нулевых остатков**: товары без остатков у всех поставщиков не показываются в поиске (EAN-поиск не фильтруется)
+  - **Batch auto_distribute()**: одно подключение к БД, batch SQL (IN (...)) вместо per-item lookup. 50 позиций: 3мс вместо ~10с.
+  - **`POST /api/cart/batch`**: добавление всех позиций автозаказа одним запросом вместо sequential await per item (~1 мин → мгновенно)
+  - **UI cleanup**: убран buildTag ("build 2026-02-12-7"), убрана статистика ("189k / 55 пост."), Cloud OK + sync indicator справа
+  - **Серая полоса сбоку**: border/shadow на закрытых панелях убраны (только на open)
+  - Прайсы обновлены и залиты на VPS (189k продуктов, 86.5MB)
+  - VPS.md — документация для работы на рабочем ПК (доступы, архитектура, команды)
+- Файлы: server.py, db.py, static/index.html, VPS.md (новый)
+
+### 2026-03-02 — PharmOrder на VPS (сессия 15)
+- Что сделано:
+  - **PharmOrder задеплоен на VPS** (194.87.140.204:8000) — systemd service, auth middleware (API key)
+  - Auth: `X-API-Key` header / cookie / `?key=` query param. `/health` без auth. Cookie ставится на 30 дней.
+  - **Sync архитектура**: VPS (PharmOrder) ← sync → локальный ПК (sync_client.py)
+  - `POST /api/sync/upload-db` — sync-client заливает sklit_cache.db (90MB, 190k продуктов)
+  - `GET /api/sync/pending-exports` + `POST /api/sync/confirm-export` — очередь экспортов
+  - `prepare_export()` в db.py — строит записи для zayava.DBF без прямой записи (VPS mode)
+  - `export_to_sklit()` рефакторнут: общая `_build_export_records()` + прямая запись только в local mode
+  - Supplier map + apteks info сохраняются в SQLite при convert() — VPS читает из DB, не из DBF
+  - `_build_supplier_map()` и `_read_apteks()` — SQLite fallback когда DBF файлов нет
+  - `needs_update()` — VPS mode: не пытается конвертить без DBF
+  - **sync_client.py** (~180 строк): watch pr_all.dbf → convert → upload DB; poll exports → write zayava.DBF → confirm
+  - **Batch lookup**: `POST /api/lookup-batch` — все EAN за один запрос. **16x ускорение** (400ms vs 6.3s на 20 кодов)
+  - Frontend `processScanQueue()` переписан: один batch запрос вместо sequential await per item
+  - **UI cloud history**: consumed выгрузки серые (opacity 0.45), badge на кнопке "Облако" с числом новых
+  - E2E тест пройден: заказ на VPS → sync-client забрал → zayava.DBF с правильными ID_PRICE/ID_POST/ID_A/ID_GRP
+  - Локальный режим (run.bat) не затронут — мама работает как раньше
+- API key VPS: `464AFZ-j5lluujCAgO4JrKkLD8twd_U5Hys5yGlTRck`
+- URL: `http://194.87.140.204:8000/?key=464AFZ-j5lluujCAgO4JrKkLD8twd_U5Hys5yGlTRck`
+- Файлы: server.py, db.py, sync_client.py (новый), sync_client.bat (новый), .env.sync (новый), .env.example (новый)
+
+### 2026-03-02 — PharmOrder планирование + TG уведомления (сессия 14)
+- Что сделано:
+  - Удалены неиспользуемые bash-скрипты (init-project.sh, setup-vm.sh)
+  - Починен /screenshot — теперь читает из буфера обмена напрямую (PowerShell)
+  - Проверена VM cortex-vm: SSH только через `gcloud compute ssh`, daily digest таймер активен (06:00 MSK)
+  - Heartbeat запущен: найден Context Mode MCP (98% сжатие контекста, 524 HN points) — записан в backlog
+  - TG уведомления для мамы: relay_server.py на VPS дополнен notify_telegram(), мама (Luda, chat_id 7255623391) получает "Новая заявка: X позиций" при каждом POST /api/scans
+  - paramiko установлен на Windows для SSH к VPS
+  - Исследован PharmOrder: FastAPI + SQLite + DBF, экспорт пишет в C:\SKLIT\zayava.DBF (бинарный append)
+  - Спланирована архитектура миграции: PharmOrder на VPS, маленький клиент на рабочем компе забирает экспорт и пишет в DBF локально
+- Решения: PharmOrder можно перенести на VPS без апгрейда сервера. Единственная привязка к локалке — запись в zayava.DBF, решается клиентским скриптом. Нужна полная версия с рабочего компа.
 
 ### 2026-03-01 — TG Bridge + SVG эксперименты (сессия 13)
 - Что сделано:
@@ -220,11 +296,28 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] /tg-digest скилл
 - [x] TG Bridge: Telegram → Claude Code через @cipher_think_bot (tools/tg-bridge/)
 - [x] dotfiles-claude синкнут с текущим состоянием
+- [x] TG уведомления маме при новых заявках (relay → @cipher_think_bot → Luda)
+- [x] /screenshot починен (буфер обмена → Read tool)
+- [x] Cleanup: удалены init-project.sh, setup-vm.sh
+- [x] PharmOrder → VPS: получить полную версию с рабочего компа
+- [x] PharmOrder → VPS: деплой (194.87.140.204:8000) + auth middleware + sync endpoints
+- [x] PharmOrder → VPS: sync_client.py для DBF экспорта + прайс-синк
+- [x] PharmOrder → VPS: batch lookup (16x speedup), cloud history UI
+- [x] PharmOrder → VPS: sync-статус в header, поиск фикс (contains), batch автозаказ + корзина
+- [x] PharmOrder → VPS: UI cleanup (buildTag, stats, панели), VPS.md документация
+- [x] PharmOrder → VPS: sync_standalone.py дописан (загрузка прайсов + экспорт), протестировано
+- [x] Context Mode MCP установлен и работает (98% сжатие контекста)
+- [x] PharmOrder → VPS: delta sync (HTTP-only, без SFTP, set-based diff)
+- [x] PharmOrder → VPS: shared scan items (server-side, real-time sync 3 сек)
+- [x] PharmOrder → VPS: мультикомп экосистема (домашний ПК + мамин ноутбук работают)
+- [ ] PharmOrder → VPS: кассовый комп (принести sklit_sync, тест)
 - [ ] Перегенерить TELEGRAM_BOT_TOKEN (засвечен в чате)
 - [ ] Анализ экспорта Telegram канала (заметки + аудио)
 - [ ] ~~Фриланс-бот~~ (отложен)
 
 ## Идеи / Backlog
+- Context Mode MCP (github.com/mksglu/claude-context-mode) — сжатие выхода тулов на 98%, сессии живут 3ч вместо 30мин
+- PharmOrder cloud: HTTPS (caddy/nginx + certbot), накладные sync
 - Контент-пайплайн: DEV_CONTEXT → статья через Claude API → Telegram канал (приватный → потом публичный)
 - Personal OS v2: Obsidian MCP (поиск по vault в реальном времени)
 - Self-improving rules (агент пишет новые правила при ошибках)
