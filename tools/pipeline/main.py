@@ -15,6 +15,8 @@ import io
 import os
 import re
 import sys
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Windows console fix
@@ -30,32 +32,53 @@ DEV_CONTEXT = ROOT / "DEV_CONTEXT.md"
 
 MODEL = "gemini-3-flash-preview"
 
-WRITING_STYLE = """Ты помогаешь писать короткие посты для Telegram-канала на основе логов разработки.
+WRITING_STYLE = """Ты пишешь build-in-public посты для Telegram-канала про AI-разработку.
+
+Цель: человек прочитал — и забрал что-то полезное. Не дневник, а пост с мясом.
+
+Структура:
+1. Что делали (2-3 предложения, контекст задачи)
+2. Полезное для читателя — САМОЕ ВАЖНОЕ:
+   - Конкретные инструменты, библиотеки, сервисы (с названиями)
+   - Команды, конфиги, сниппеты которые реально работают
+   - Грабли на которые наступили и как обошли
+   - Ссылки если релевантны
+3. Вывод/инсайт (1-2 предложения, что вынес)
 
 Стиль:
-- Разговорный, без воды, без мотивашек
-- От первого лица, как будто пишешь себе в дневник
-- Матерные слова допустимы если уместны, не вставляй их специально
-- Конкретика: что именно сделал, что не работало, что понял
-- Незавершённые мысли — нормально
+- Разговорный, от первого лица
+- Без воды, без мотивашек, без "ты молодец"
+- Мат допустим если уместен
+- Конкретика > абстракции
 
-Структура (не буквально, по ощущению):
-- Что было / ситуация
-- Что сделал / что не сработало
-- Что понял (если есть)
+Длина: 200-500 слов.
 
-Длина: 150-350 слов. Не больше.
-
-Форматирование для Telegram:
-- Жирный через *текст*
+Форматирование (Telegram MarkdownV2):
+- Жирный: *текст*
+- Код inline: `команда`
+- Блок кода: ```язык\\nкод```
+- Списки через дефис
 - Никаких заголовков с ###
-- Можно список через дефис если реально нужен
+
+Anti-slop правила (ОБЯЗАТЕЛЬНО):
+- Миксуй длину предложений: короткие (3-5 слов) с длинными (25+). Никогда 3+ подряд одной длины
+- Никогда не группируй ровно по 3 (примера, пункта, прилагательных). Два или четыре
+- Запрещённые слова: ключевой, фундаментальный, трансформативный, экосистема (в переносном), ландшафт (в переносном), путешествие (в переносном), инновационный, бесшовный, комплексный, динамичный, надёжный
+- Вместо "служит как", "является свидетельством", "играет важную роль" — пиши прямо что делает
+- Не начинай с "В современном мире", "В эпоху AI", "В контексте"
+- Не заканчивай предложения причастными оборотами типа "подчёркивая важность..."
+- Не хеджируй: "некоторые считают", "эксперты утверждают" — назови конкретно кто
+- Займи позицию. "Это не работает потому что..." вместо "с одной стороны X, с другой Y"
+- Добавляй текстуру: оборванная мысль, самокоррекция, casual вставка в серьёзном тексте
+- Используй сокращения: "не" вместо "не является", живой язык вместо канцелярита
 
 НЕ писать:
-- "Таким образом...", "В заключение...", "Подводя итоги..."
-- Мотивашки и "ты молодец"
-- Формальный язык
-- Длинные нумерованные списки"""
+- "Таким образом...", "В заключение...", "Подводя итоги...", "Стоит отметить..."
+- "Не просто X, а Y", "Не только X, но и Y"
+- Общие фразы без конкретики ("настроил штуку", "поработал над проектом")
+- Формальный язык, канцелярит
+- Длинные нумерованные списки
+- Абзацы с одинаковой структурой (тезис → пример → вывод) — ломай паттерн"""
 
 
 @beartype
@@ -89,14 +112,16 @@ def generate_article(session_log: str) -> str:
 
 
 @beartype
-def send_to_telegram(text: str, token: str, chat_id: str) -> int:
-    """Send message to Telegram. Returns message_id."""
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    response = httpx.post(
-        url,
-        json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-        timeout=30,
-    )
+def send_file_to_telegram(filepath: Path, caption: str, token: str, chat_id: str) -> int:
+    """Send file to Telegram. Returns message_id."""
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    with open(filepath, "rb") as f:
+        response = httpx.post(
+            url,
+            data={"chat_id": chat_id, "caption": caption},
+            files={"document": (filepath.name, f)},
+            timeout=30,
+        )
     response.raise_for_status()
     result: dict[str, object] = response.json()
     message = result["result"]  # type: ignore[index]
@@ -130,15 +155,22 @@ def main() -> None:
     print(f"Generating via {MODEL}...")
     article = generate_article(last_session)
 
+    # Save as .md (always, even in dry-run)
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    md_path = ROOT / "data" / "posts" / f"cortex_post_{date_str}.md"
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(article, encoding="utf-8")
+
     print(f"\n{'='*50}\n{article}\n{'='*50}\n")
     print(f"Length: {len(article)} chars")
+    print(f"Saved: {md_path}")
 
     if dry_run:
         print("Dry run — not sending to Telegram")
         return
 
-    # Send
-    msg_id = send_to_telegram(article, token, chat_id)
+    caption = f"Build log — {date_str}"
+    msg_id = send_file_to_telegram(md_path, caption, token, chat_id)
     print(f"Sent to Telegram: message_id={msg_id}")
 
 

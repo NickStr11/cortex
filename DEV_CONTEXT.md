@@ -1,15 +1,38 @@
 # Development Context Log
 
 ## Последнее обновление
-- Дата: 2026-03-03
+- Дата: 2026-03-04
 
 ## Текущий статус
-- Этап: PharmOrder VPS — delta sync + shared scan items готовы, работают в продакшне.
-- Последнее действие: сессия 18 — delta sync (HTTP, без SFTP), shared scan items (server-side вместо localStorage), мультикомп экосистема.
-- Текущий фокус: завтра принести sklit_sync на кассовый комп, единая экосистема.
-- Следующий шаг: тест на кассовом ПК, остатки, неизвестные товары (ЧЗ или ручная привязка).
+- Этап: PharmOrder VPS — история приходов + Созвездие матрица в продакшне.
+- Последнее действие: сессия 20 — история приходов (ReeTov.DBF), маркеры Созвездие (О/Р), прайс-чекер (розничные цены).
+- Текущий фокус: прайс-чекер по DataMatrix (нужен ReeTov.DBF с рабочего компа, там розничные цены).
+- Следующий шаг: принести ReeTov.DBF с рабочего ПК → добавить BL_ROSN_PR в order_history.db → endpoint "цена по GTIN".
 
 ## История изменений
+
+### 2026-03-04 — История приходов + Созвездие матрица + прайс-чекер R&D (сессия 20)
+- Что сделано:
+  - **История приходов (ReeTov.DBF)**: sozvhist.dbf оказался бонусной программой "Созвездие", а НЕ историей заказов. Найден ReeTov.DBF (85,805 записей, 7,747 EAN, 13 поставщиков) — реестр приходов товаров. Перестроен order_history.db, обновлены SQL-запросы в server.py (ean вместо ean13, nakl_date вместо datezak, pr_w_nds вместо price). Бейджи в UI: "123x (72%)" рядом с поставщиками.
+  - **Созвездие (МС "Созвездие")**: исследован маркетинговый союз аптек при ПУЛЬС. Два типа матриц: MANDATORY_MATRIX (О — обязательная) и RECOMMENDED_GOODS (Р — рекомендованная). Текущий квартал 1кв2026: 18,073 EAN (5,614 обязательных + 12,459 рекомендованных). Создан sozvezdie.db (product.dbf + product_post.dbf + workt_5160.dbf → SQLite с таблицами matrix_products и matrix_suppliers). API: `/api/sozvezdie` (по EAN → тип матрицы + рек.цена + список поставщиков), `/api/sozvezdie-batch` (batch-проверка для поиска). UI: маркеры О/Р в поиске, в заголовке товара, на строках поставщиков + инфо-баннер "Товар входит в маркетинговый ассортимент Созвездие (Обязательная матрица, рек.цена: 68₽)".
+  - **Прайс-чекер R&D**: розничные цены хранятся в ReeTov.DBF поле BL_ROSN_PR (закупка × наценка из gradeRascen.DBF). Формула: до 300₽→25%, 300-600₽→24%, 600+₽→23%. НО на маминой копии BL_ROSN_PR=0 — расценка делается на рабочем ПК. Нужен ReeTov.DBF с рабочего компа. DataMatrix парсинг работает: GTIN→EAN→поиск в базе (протестировано на 3 кодах: Колдакт бронхо, Цистон, Питавастор).
+  - **sync_standalone.py обновлён**: добавлены `_convert_reetov()`, `sync_order_history()`, `_convert_sozvezdie()`, `sync_sozvezdie()`. Main loop: прайсы (60с) + заявки (5с) + история (5мин) + матрица (10мин). sync.bat: добавлен `dbfread` в зависимости.
+  - **sklit_sync.zip** пересобран (12 KB) на рабочем столе — готов для мамы.
+- Файлы: server.py (supplier-history SQL fix, sozvezdie endpoints, sozvezdie-batch), index.html (supplier hist badges, sozvezdie badges О/Р в поиске/header/offers, info banner), order_history.db (rebuilt from ReeTov), sozvezdie.db (new), sync_standalone.py (reetov + sozvezdie sync)
+- Данные: ReeTov.DBF=85,805 приходов (март 2025—март 2026), product.dbf=36,511 товаров матрицы, 120,608 связей товар-поставщик
+
+### 2026-03-04 — Scan items fix + EAN aliases + параллельные сессии (сессия 19)
+- Что сделано:
+  - **Баг scan items**: при перезапуске sync.bat отсканированные коды исчезали через секунду. Причина: sync.bat открывал браузер без `?key=` → 401, плюс race condition — пустой localStorage мог перезаписать серверные данные.
+  - **Фикс sync.bat**: URL теперь включает `?key=...` для автоматической авторизации.
+  - **Фикс index.html (VPS)**: добавлен флаг `_scanItemsServerLoaded` — пустой массив НЕ перезаписывает сервер до первой успешной загрузки. Убрано условие `d.items.length` при инит-загрузке.
+  - **EAN alias**: Энам (4810703128026, белорусский перепак) привязан к Энам 20мг (оригинальный EAN 8901148245525) — 13 предложений от поставщиков.
+  - **Диагностика**: 3 неизвестных EAN (4610166050113, 5060391651965, 4810703128026). Первые два — реально отсутствуют у поставщиков. Третий (Энам) — исправлен.
+  - **Параллельные сессии**: работа в двух окнах Claude Code одновременно для ускорения итераций.
+  - **sklit_sync.zip** пересобран (11 KB, без .db файлов) для отправки маме.
+- Файлы: index.html (VPS, scan items guard), sync.bat (auth URL), sklit_cache.db (VPS, EAN alias)
+- Архитектура: для полноценной привязки альтернативных EAN нужна таблица `ean_aliases(ean → id_name)` — пока ручные INSERT в продакшн DB.
+
 
 ### 2026-03-03 — Delta sync + shared scan items (сессия 18)
 - Что сделано:
@@ -310,6 +333,13 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] PharmOrder → VPS: delta sync (HTTP-only, без SFTP, set-based diff)
 - [x] PharmOrder → VPS: shared scan items (server-side, real-time sync 3 сек)
 - [x] PharmOrder → VPS: мультикомп экосистема (домашний ПК + мамин ноутбук работают)
+- [x] PharmOrder: история приходов (ReeTov.DBF → order_history.db, бейджи "72% Катрен")
+- [x] PharmOrder: Созвездие матрица (О/Р маркеры в поиске, header, таблице поставщиков)
+- [x] PharmOrder: sozvezdie.db с привязкой поставщиков к товарам матрицы (120K связей)
+- [x] PharmOrder: batch endpoint sozvezdie-batch для поиска
+- [ ] PharmOrder: прайс-чекер (нужен ReeTov.DBF с рабочего ПК, BL_ROSN_PR=0 на маминой копии)
+- [ ] PharmOrder: ИИ-рекомендации (Gemini — синтез: история + цена + матрица → совет)
+- [ ] PharmOrder: автозаявка (скорость продаж + остатки → прогноз)
 - [ ] PharmOrder → VPS: кассовый комп (принести sklit_sync, тест)
 - [ ] Перегенерить TELEGRAM_BOT_TOKEN (засвечен в чате)
 - [ ] Анализ экспорта Telegram канала (заметки + аудио)

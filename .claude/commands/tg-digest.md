@@ -19,7 +19,7 @@
    import os
    # GOOGLE_API_KEY из .env
    client = genai.Client()
-   response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt + messages)
+   response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt + messages)
    ```
 
 5. Промпт для Gemini:
