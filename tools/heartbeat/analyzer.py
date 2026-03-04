@@ -13,11 +13,19 @@ Given:
 
 Produce a concise Heartbeat digest in this format:
 
+### HN Ссылки
+(All Hacker News links from the raw data, each with a 1-sentence Russian description of what the article is about. Keep the original link.)
+
+1. [Original Title](url) — краткое описание на русском, о чём статья
+2. ...
+
+(list ALL HN stories from raw data, not just relevant ones)
+
 ### Relevant Trends
 1. **[Trend Name]** — [1-sentence why it matters] ([link])
    - Actionable: [concrete task for an AI agent]
 
-(5-10 most relevant trends)
+(5-10 most relevant trends from ALL sources)
 
 ### Recommended Actions
 - [ ] [Task description for /dispatch] (agent: Jules/Codex, size: S/M/L)
@@ -32,7 +40,8 @@ Produce a concise Heartbeat digest in this format:
 - X trends analyzed: W
 
 Rules:
-- Focus on trends relevant to PROJECT_CONTEXT (AI agents, orchestration, Python, automation)
+- The "HN Ссылки" section MUST come first, with Russian descriptions for every HN link
+- Focus trends on what's relevant to PROJECT_CONTEXT (AI agents, orchestration, Python, automation)
 - Every recommendation must be specific enough to become a GitHub Issue
 - Be concise, no filler
 """

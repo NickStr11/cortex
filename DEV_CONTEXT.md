@@ -4,12 +4,40 @@
 - Дата: 2026-03-04
 
 ## Текущий статус
-- Этап: PharmOrder VPS — история приходов + Созвездие матрица в продакшне.
-- Последнее действие: сессия 20 — история приходов (ReeTov.DBF), маркеры Созвездие (О/Р), прайс-чекер (розничные цены).
-- Текущий фокус: прайс-чекер по DataMatrix (нужен ReeTov.DBF с рабочего компа, там розничные цены).
-- Следующий шаг: принести ReeTov.DBF с рабочего ПК → добавить BL_ROSN_PR в order_history.db → endpoint "цена по GTIN".
+- Этап: Kwork фриланс — профиль заполнен, обложки генерятся, кворки не опубликованы.
+- Последнее действие: сессия 21 — Kwork автоматизация (профиль + кворки через Playwright + proxy), генерация обложек через Nano Banana 2 Pro (Imagen/Gemini).
+- Текущий фокус: доделать обложки для кворков (проблема: нет контролируемого результата по визуалу через AI-генераторы).
+- Следующий шаг: найти подход к управляемой генерации обложек → опубликовать 3 кворка.
 
 ## История изменений
+
+### 2026-03-04 — Kwork автоматизация: профиль + кворки + обложки (сессия 21)
+- Что сделано:
+  - **Kwork профиль**: заполнен через Playwright + HTTP proxy (45.135.29.96:8000, VPN блокирует kwork.ru). Специализация, описание, навыки. Профиль подтверждён скриншотом.
+  - **Kwork creation script** (`tools/kwork-monitor/create_kwork.py`): 6 итераций отладки формы:
+    - Title: contenteditable div `#editor-title` + `keyboard.type()` (НЕ textarea)
+    - Categories: jQuery Chosen.js → `jQuery(sel).val().trigger('chosen:updated').trigger('change')`
+    - Type/Вид/Язык/Платформа: labels в `#kwork-save-attributes` → Playwright `.get_by_text().click()`
+    - "Продолжить": это `<div class="js-next-step-btn">`, НЕ button. JS `.click()` не работает, только Playwright native click
+    - Description/Instruction: trumbowyg WYSIWYG → innerHTML + textarea.value
+    - Cover: `input[name="first-kwork-photo[]"]` (не первый file input!)
+    - Publish: кнопка "Готово" (не `.js-save-kwork` — тот только сохраняет черновик)
+  - **3 кворка подготовлены** (не опубликованы):
+    1. "Разработаю Telegram-бота на Python" — 5000₽, 5 дней, Чат-боты
+    2. "Спаршу данные с любого сайта" — 3000₽, 3 дня, Парсеры
+    3. "Создам AI чат-бота с базой знаний" — 10000₽, 7 дней, ИИ-боты
+  - **Генерация обложек** — попробовано 5 подходов:
+    1. Pillow (градиент + текст) — убого
+    2. HTML+CSS → Playwright screenshot — чистый дизайн, но "дёшево"
+    3. Imagen 4.0 (без текста) — неплохие абстракции, текст нужен отдельно
+    4. Imagen 4.0 (с текстом) — коверкает кириллицу ("Марсинь", "зат-фот")
+    5. **Nano Banana 2 Pro** (`gemini-3-pro-image-preview`) — лучший результат, кириллица ок, но нет контроля над точным визуалом
+  - **Nano Banana скилл** создан: `.claude/skills/banana/SKILL.md` — инструкция по генерации через Pro версию
+  - **Референсы протестированы**: Emberlen (Behance) и Google Antigravity (antigravity.google) — подкидывались как PIL Image в промпт. Модель ловит общий вайб, но не даёт точного контроля.
+- **Открытая проблема**: AI-генераторы не дают контролируемый результат по визуалу. Промпт → рандом. Нет способа точно указать layout, spacing, font weight, glow intensity. Для production-quality обложек нужен либо Figma/Photoshop, либо HTML+CSS (точный контроль) + AI-фон (атмосфера).
+- Файлы: create_kwork.py (main script), gen_covers.py (Nano Banana генерация), render_covers.py (HTML→PNG), explore_form.py (DOM exploration), find_title.py (title field investigation), test_step1.py (step navigation test), open_kwork.py (browser opener), covers/*.html (HTML covers), covers/*.png (generated), covers/ref/ (reference screenshots)
+- Утилиты: fill_profile.py, send_profile.py, check_profile.py (профиль — выполнено)
+- Решения: Kwork.ru использует jQuery + Chosen.js (не Vue). Формы — accordion (4 шага на одной странице). HTTP proxy обязателен (VPN блокирует). Nano Banana 2 Pro — лучший генератор с кириллицей, но для точного дизайна нужен другой подход.
 
 ### 2026-03-04 — История приходов + Созвездие матрица + прайс-чекер R&D (сессия 20)
 - Что сделано:
@@ -343,6 +371,11 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [ ] PharmOrder → VPS: кассовый комп (принести sklit_sync, тест)
 - [ ] Перегенерить TELEGRAM_BOT_TOKEN (засвечен в чате)
 - [ ] Анализ экспорта Telegram канала (заметки + аудио)
+- [x] Kwork: профиль заполнен через Playwright + proxy
+- [x] Kwork: create_kwork.py — автоматизация создания кворков (все 4 шага)
+- [x] Kwork: Nano Banana скилл (`.claude/skills/banana/SKILL.md`)
+- [ ] Kwork: обложки (нет контроля визуала через AI-генераторы)
+- [ ] Kwork: опубликовать 3 кворка
 - [ ] ~~Фриланс-бот~~ (отложен)
 
 ## Идеи / Backlog
