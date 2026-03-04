@@ -1,0 +1,15 @@
+[Unit]
+Description=Cortex Daily Digest (TG Monitor + Heartbeat)
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/cortex
+EnvironmentFile=/opt/cortex/.env
+ExecStart=/opt/cortex/.venv/bin/python tools/tg-monitor/daily.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -16,7 +16,7 @@
 ## 3. Workflow
 
 - Перед значительными изменениями — план. Большие задачи → мелкие шаги.
-- Git First: коммить после каждой рабочей фичи. Не коммить в main напрямую.
+- Git: коммить ТОЛЬКО по запросу (`/quick-commit`, "закоммить") или при `/handoff`. Не коммить в main напрямую.
 - Не запускай `npm run dev` / `python -m ...` автоматически.
 - Quality Gates: Build → Types → Lint → Tests (80%+) → Security → Diff.
 - Conventional Commits: `<type>(<scope>): <description>`. Детали: @docs/git-flow.md
@@ -25,7 +25,7 @@
 
 | Момент | Действие |
 |--------|----------|
-| **Старт сессии** | Прочитать DEV_CONTEXT.md и PROJECT_CONTEXT.md |
+| **Старт сессии** | Прочитать DEV_CONTEXT.md, PROJECT_CONTEXT.md и последний дейлик из Obsidian (`C:/Program Files/Obsidian/obsVaultPC/GameChanger/Daily/`) |
 | **После кода** | Проверить build/тесты |
 | **Перед PR** | `/verify` |
 | **Финиш сессии** | `/handoff` |
