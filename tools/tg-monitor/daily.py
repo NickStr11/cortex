@@ -91,11 +91,20 @@ def run_tg_fetch() -> bool:
 
 @beartype
 def run_tg_digest(dry_run: bool, hours: int) -> str | None:
-    """Generate TG group digest."""
-    print("\n[3/3] Generating TG digest...")
+    """Generate TG group digest via MapReduce pipeline."""
+    print("\n[3/3] Generating TG digest (MapReduce)...")
     try:
         sys.path.insert(0, str(TG_MONITOR_DIR))
-        from digest import generate_digest, load_recent_messages, format_messages_for_llm
+        from digest import (
+            load_recent_messages,
+            enrich_messages,
+            filter_top_messages,
+            pipeline_map,
+            pipeline_reduce,
+            pipeline_verify,
+            CHUNK_SIZE,
+        )
+        import math
 
         groups_messages = load_recent_messages(hours)
         if not groups_messages:
@@ -104,10 +113,26 @@ def run_tg_digest(dry_run: bool, hours: int) -> str | None:
 
         parts: list[str] = []
         for group_name, messages in groups_messages.items():
-            messages_text = format_messages_for_llm(group_name, messages)
-            digest = generate_digest(group_name, messages_text)
+            print(f"  {group_name}: {len(messages)} messages")
+            # Enrich
+            enriched = enrich_messages(messages)
+            # Filter
+            top = filter_top_messages(enriched)
+            if len(top) < 5:
+                top = sorted(enriched, key=lambda m: str(m.get("date", "")))
+            print(f"    filtered: {len(top)} messages")
+            # MAP
+            n_chunks = max(1, math.ceil(len(top) / CHUNK_SIZE))
+            chunks = [top[i * CHUNK_SIZE:(i + 1) * CHUNK_SIZE] for i in range(n_chunks)]
+            topics = pipeline_map(chunks)
+            # REDUCE
+            digest = pipeline_reduce(group_name, topics)
+            # VERIFY
+            verify_result = pipeline_verify(digest, top)
+            if "HALLUCINATION" in verify_result.upper():
+                print(f"    WARNING: hallucinations detected in {group_name}")
             parts.append(digest)
-            print(f"  {group_name}: {len(digest)} chars")
+            print(f"    digest: {len(digest)} chars")
 
         return "\n\n---\n\n".join(parts)
     except Exception as e:
