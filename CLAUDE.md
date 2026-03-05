@@ -21,6 +21,14 @@
 - Quality Gates: Build → Types → Lint → Tests (80%+) → Security → Diff.
 - Conventional Commits: `<type>(<scope>): <description>`. Детали: @docs/git-flow.md
 
+### Делегирование — субагенты и Codex
+- **Не делай сам то что можно делегировать.** Подписки оплачены — выжимай максимум.
+- 3+ шагов ресёрча → субагент Explore, не 5 последовательных Grep руками.
+- Независимые задачи → параллельные Task-ы в одном сообщении.
+- Проверки/аудит → `run_in_background`, не блокируй основную работу.
+- **Codex CLI MCP** (`reasoningEffort: xhigh`): ресёрч, второе мнение, веб-поиск. Использовать активно.
+- Полный playbook: @memory/subagents-playbook.md
+
 ## 4. Mandatory Actions
 
 | Момент | Действие |
