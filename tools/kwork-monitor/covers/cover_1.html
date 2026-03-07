@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 660px;
+  height: 440px;
+  overflow: hidden;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #0a0a0a;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 48px 56px;
+}
+
+.glow {
+  position: absolute;
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  background: #00C853;
+  filter: blur(120px);
+  opacity: 0.12;
+  bottom: -60px;
+  left: -30px;
+}
+
+.label {
+  color: #00C853;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 28px;
+}
+
+h1 {
+  color: #ffffff;
+  font-size: 44px;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  margin-bottom: 12px;
+}
+
+h1 span {
+  color: #00C853;
+}
+
+.sub {
+  color: rgba(255,255,255,0.4);
+  font-size: 15px;
+  font-weight: 400;
+  margin-bottom: 36px;
+}
+
+.tags {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tag {
+  background: rgba(0, 200, 83, 0.10);
+  border: 1px solid rgba(0, 200, 83, 0.25);
+  color: #00C853;
+  padding: 8px 18px;
+  border-radius: 24px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.line {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #00C853;
+}
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+
+  <div class="label">Web Scraping & Data</div>
+  <h1><span>Парсинг</span><br>любого сайта.</h1>
+  <div class="sub">Данные в удобном формате — CSV, Excel, JSON</div>
+
+  <div class="tags">
+    <span class="tag">Scrapy</span>
+    <span class="tag">Playwright</span>
+    <span class="tag">Cloudflare bypass</span>
+    <span class="tag">1M+ записей</span>
+  </div>
+
+  <div class="line"></div>
+</body>
+</html>
