@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+seen.db
+covers/*.png
+covers/*.jpg
+.env

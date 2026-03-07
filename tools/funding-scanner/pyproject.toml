@@ -1,0 +1,24 @@
+[project]
+name = "funding-scanner"
+version = "0.1.0"
+description = "Funding rate arbitrage scanner across CEX and DEX"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx",
+    "beartype",
+    "python-dotenv",
+    "paramiko",
+    "fastapi",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+dev = ["mypy", "pyright"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"

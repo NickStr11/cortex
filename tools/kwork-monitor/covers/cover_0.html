@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 660px;
+  height: 440px;
+  overflow: hidden;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #0a0a0a;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 48px 56px;
+}
+
+/* Subtle accent glow */
+.glow {
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  background: #2D7FF9;
+  filter: blur(120px);
+  opacity: 0.15;
+  top: -40px;
+  right: -20px;
+}
+
+/* Top label */
+.label {
+  color: #2D7FF9;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 28px;
+}
+
+h1 {
+  color: #ffffff;
+  font-size: 44px;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  margin-bottom: 12px;
+}
+
+h1 span {
+  color: #2D7FF9;
+}
+
+.sub {
+  color: rgba(255,255,255,0.4);
+  font-size: 15px;
+  font-weight: 400;
+  margin-bottom: 36px;
+}
+
+.tags {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tag {
+  background: rgba(45, 127, 249, 0.12);
+  border: 1px solid rgba(45, 127, 249, 0.25);
+  color: #2D7FF9;
+  padding: 8px 18px;
+  border-radius: 24px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Bottom line */
+.line {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #2D7FF9;
+}
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+
+  <div class="label">Telegram Bot Development</div>
+  <h1>Telegram-<span>бот</span><br>на Python.</h1>
+  <div class="sub">Под ваши задачи — от идеи до деплоя</div>
+
+  <div class="tags">
+    <span class="tag">aiogram 3</span>
+    <span class="tag">PostgreSQL</span>
+    <span class="tag">Docker</span>
+    <span class="tag">API</span>
+  </div>
+
+  <div class="line"></div>
+</body>
+</html>

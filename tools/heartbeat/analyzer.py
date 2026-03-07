@@ -14,12 +14,13 @@ Given:
 Produce a concise Heartbeat digest in this format:
 
 ### HN Ссылки
-(All Hacker News links from the raw data, each with a 1-sentence Russian description of what the article is about. Keep the original link.)
+CRITICAL: Every single HN link MUST have a Russian description after "—". No exceptions. Do NOT output bare links without descriptions.
 
-1. [Original Title](url) — краткое описание на русском, о чём статья
-2. ...
+Format (follow EXACTLY):
+1. [Original Title](url) — описание на русском что это и почему интересно
+2. [Original Title](url) — описание на русском что это и почему интересно
 
-(list ALL HN stories from raw data, not just relevant ones)
+Include ALL HN stories from raw data, not just relevant ones. If you skip the Russian description for even one link, the output is invalid.
 
 ### Relevant Trends
 1. **[Trend Name]** — [1-sentence why it matters] ([link])

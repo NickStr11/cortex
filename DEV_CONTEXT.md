@@ -1,15 +1,74 @@
 # Development Context Log
 
 ## Последнее обновление
-- Дата: 2026-03-04
+- Дата: 2026-03-07
 
 ## Текущий статус
-- Этап: Инфраструктура и процессы — cleanup репо, git sync, правила делегирования.
-- Последнее действие: сессия 22 — git housekeeping, cleanup мусора, субагент-playbook.
-- Текущий фокус: обложки кворков → публикация. Аптека: прайс-чекер (нужен ReeTov с рабочего ПК).
-- Следующий шаг: доделать обложки кворков → опубликовать 3 кворка ИЛИ принести ReeTov.DBF с рабочего ПК для прайс-чекера.
+- Этап: Funding Rate Scanner — полный рабочий инструмент задеплоен.
+- Последнее действие: сессия 26 — фикс settled-rate фильтра, добавление predicted rate, верификация данных.
+- Текущий фокус: **Funding Rate Scanner** на VM (http://34.159.55.61:8080) + **Kwork Monitor** (auto-scan + AI + TG). Детали: `memory/funding-arb.md`
+- Следующий шаг: опубликовать кворки, мониторить funding спреды.
 
 ## История изменений
+
+### 2026-03-07 — Funding Scanner: settled filter fix + deploy (сессия 26)
+- Что сделано:
+  - **Баг settled-rate фильтра**: `ts % bucket_secs < 10` не работал для бирж с нестандартным settlement time (KuCoin 4/12/20 UTC vs Binance 0/8/16 UTC). Фикс: `ts % 3600 < 10` — все settlement timestamps на любой бирже кратны часу.
+  - **Predicted rate включён**: последний predicted rate (из 5-мин сканера) добавляется к settled средним — как делают большинство агрегаторов.
+  - **Деплой на VM**: обновлены web.py и backfill.py, сервис перезапущен.
+  - **Backfill на VM**: 804 новых записей (EdgeX 1260 rates / 29.8 дней, Paradex 210 / 3.1 дня).
+  - **Daily backfill timer**: `funding-backfill.timer` — ежедневно в 03:00 UTC (06:00 МСК).
+  - **Верификация vs референс**: 30d delta 0.1-0.3% (perfect), 14d 0.0-0.9%, 7d 0.0-0.7%. 1d расходится на 3-9% из-за кэширования референса (обновляется раз в 6+ часов).
+  - **Codex CLI xhigh**: получено второе мнение по методологии — нормализация по времени `sum(rates)/sum(hours)×8760`, включение predicted rate — стандарт индустрии.
+- Файлы: web.py (settled filter + predicted rate), backfill.py (без изменений в этой сессии)
+
+### 2026-03-06 — Funding Scanner: backfill fixes + data verification (сессия 25)
+- Что сделано:
+  - **Paradex backfill**: cursor-based pagination (50 pages × 1000 entries), bucketing to 8h windows. Результат: 210 rates (3.1 дня). API стримит каждые 5 сек → 518K entries для 30 дней, полный backfill нереален.
+  - **EdgeX backfill**: увеличен size 100→200, добавлена pagination через `nextPageOffsetData`, max 5 pages. Результат: 1260 rates, полные 29.8 дней.
+  - **web.py упрощён**: убран bucketing/deduplication step, simple average of settled rates.
+  - **Reverse-engineering референса**: `/api/historical/apr` — pre-computed integer arrays, scale=100, `generated_at` обновляется раз в 6+ ч. Frontend = pure render, вся логика на сервере.
+  - **Сравнение**: 30d match 0.0-0.2% (excellent), 7d 0.0-1.0% (good), 1d 3-9% (timing issue).
+- Файлы: backfill.py (Paradex cursor, EdgeX pagination), web.py (simplified averaging)
+
+### 2026-03-05/06 — Funding Scanner: full build (сессии 23-24)
+- Что сделано:
+  - **Полный скрипт сканера**: 12 бирж (7 CEX + 5 DEX), 21 монета, async httpx, SQLite DB
+  - **Биржи**: Binance, Bybit, OKX, KuCoin, Bitget, Gate, MEXC (CEX) + Hyperliquid, Paradex, EdgeX, Pacifica, Extended (DEX)
+  - **Web dashboard**: FastAPI + HTML/CSS/JS, таблица спредов, фильтр по монетам, сортировка, иконки бирж (CoinMarketCap + DEX favicons), real-time обновление 10 сек
+  - **Backfill**: 30 дней settled rates для всех бирж, async pagination
+  - **DB**: SQLite WAL, UNIQUE index (ts, exchange, coin), rates + spreads tables, trend detection
+  - **Scanner loop**: systemd timer каждые 5 мин (predicted rates)
+  - **Web service**: systemd service, uvicorn, порт 8080
+  - **Deploy на VM**: cortex-vm (34.159.55.61), Google Cloud, europe-west3-b
+  - **Алерты**: TG интеграция (форматированные сообщения при спреде >15%/yr)
+  - **Аннуализация**: корректная для разных интервалов (1h ×8760, 4h ×2190, 8h ×1095)
+- Файлы: exchanges.py, scanner.py, db.py, config.py, alerts.py, web.py, backfill.py, deploy.py, main.py
+
+### 2026-03-05/06 — Kwork Monitor: авто-сканер + AI + бот (сессии 23-24)
+- Что сделано:
+  - **main.py**: fetch проектов Kwork API → фильтрация keywords/stop-words → параллельная оценка Gemini Flash → отправка в TG. Режимы: `--loop` (polling 15 мин), `--dry-run`
+  - **bot.py**: интерактивный бот — scan → AI оценка → TG с кнопками → автоматическая подача offers через pykwork SDK
+  - **config.py**: категории (IT=11, боты=41, парсинг=79), keywords (telegram, парсинг, AI, Python), stop-words (iOS, frontend, PHP), цены 3K-300K
+  - **create_kwork.py**: Playwright автоматизация создания кворков (contenteditable title, Chosen.js, trumbowyg WYSIWYG, cover upload)
+  - **gen_covers.py**: обложки через Gemini Image Gen (банана)
+  - **fill_profile.py**: заполнение профиля через Playwright
+  - **Proxy**: HTTP proxy обязателен (VPN блокирует kwork.ru)
+  - **Dedup**: SQLite seen.db, 5 concurrent Gemini requests (семафор)
+- Файлы: main.py, bot.py, config.py, create_kwork.py, gen_covers.py, fill_profile.py, explore_form.py, find_title.py, и др.
+
+### 2026-03-05 — Funding Rate Arbitrage ресёрч (сессия 23)
+- Что сделано:
+  - **Ресёрч funding rate арбитража**: панель tablefundthe.replit.app (платная подписка), логин/IP задокументированы в memory/funding-arb.md
+  - **Верификация данных панели**: проверены реальные рейты через API Binance, Bybit, OKX — данные панели подтверждены
+  - **CEX vs DEX анализ**: CEX↔CEX спреды ~0% (все около нуля), CEX↔DEX спреды 10-40%/yr на топ-монетах
+  - **API подключены**: Binance premiumIndex, Bybit v5 tickers, Hyperliquid metaAndAssetCtxs, dYdX v4 perpetualMarkets
+  - **Текущие спреды** (BTC): Hyperliquid +10.95%/yr vs Binance +0.25%/yr = ~10.7% спред
+  - **Лучшие спреды**: DOGE ~41% (dYdX vs Binance), OP ~38% (Hyperliquid vs Binance), AVAX ~22%
+  - **Расчёт break-even**: price spread ~0.17% + commissions ~0.08% → ~13 дней при 7%/yr
+  - **memory/funding-arb.md создан**: полный контекст — панель, API, рейты, стратегия, следующие шаги
+- Файлы: memory/funding-arb.md (новый)
+- Решения: CEX↔DEX = основная стратегия. BTC/ETH через Hyperliquid самый безопасный. Следующий шаг — мониторинг-бот с TG алертами.
 
 ### 2026-03-04 — Git housekeeping + субагент-playbook (сессия 22)
 - Что сделано:
@@ -306,8 +365,8 @@ architect, code-reviewer, security-auditor, verify-agent
 ### Хуки (8)
 check-secrets, check-filesize, pre-commit-check, protect-main, grab-screenshot, output-secret-filter, mcp-usage-tracker, expensive-tool-warning
 
-### Tools (4)
-heartbeat (HN/Reddit/GitHub trends), pipeline (DEV_CONTEXT → article → Telegram), tg-monitor (TG groups → digest → Telegram), tg-bridge (Telegram → Claude Code bridge)
+### Tools (6)
+heartbeat (HN/Reddit/GitHub trends), pipeline (DEV_CONTEXT → article → Telegram), tg-monitor (TG groups → digest → Telegram), tg-bridge (Telegram → Claude Code bridge), funding-scanner (12 бирж × 21 монета, web dashboard, VM deploy), kwork-monitor (auto-scan + AI оценка + TG бот)
 
 ### Workflows (4)
 heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigger), pipeline.yml (DEV_CONTEXT → Telegram)
@@ -390,6 +449,14 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] Git housekeeping: 7 непушнутых коммитов main → синхронизированы
 - [x] Cleanup репо: 46 мусорных файлов удалены
 - [x] Субагент-playbook: правила делегирования в CLAUDE.md + memory
+- [x] Funding Rate Scanner: полный стек (12 бирж, 21 монета, SQLite, FastAPI web dashboard)
+- [x] Funding Rate Scanner: backfill 30 дней settled rates + daily timer
+- [x] Funding Rate Scanner: deploy на VM (34.159.55.61:8080, systemd service + timer)
+- [x] Funding Rate Scanner: верификация vs референс (30d delta <0.3%)
+- [x] Kwork Monitor: auto-scan Kwork API + Gemini AI оценка + TG алерты
+- [x] Kwork Monitor: интерактивный бот (bot.py) — scan → оценка → auto-offer
+- [x] Kwork Monitor: create_kwork.py — автоматизация публикации кворков
+- [ ] Kwork: опубликовать 3 кворка
 - [ ] ~~Фриланс-бот~~ (отложен)
 
 ## Идеи / Backlog
