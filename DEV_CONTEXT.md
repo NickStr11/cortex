@@ -1,15 +1,32 @@
 # Development Context Log
 
 ## Последнее обновление
-- Дата: 2026-03-07
+- Дата: 2026-03-08
 
 ## Текущий статус
-- Этап: Funding Rate Scanner — полный рабочий инструмент задеплоен.
-- Последнее действие: сессия 26 — фикс settled-rate фильтра, добавление predicted rate, верификация данных.
-- Текущий фокус: **Funding Rate Scanner** на VM (http://34.159.55.61:8080) + **Kwork Monitor** (auto-scan + AI + TG). Детали: `memory/funding-arb.md`
-- Следующий шаг: опубликовать кворки, мониторить funding спреды.
+- Этап: Repo docs sync + PharmOrder sozvezdie fix.
+- Последнее действие: сессия 27 — документация cortex приведена в соответствие, PharmOrder sozvezdie фикс задеплоен, TG Monitor брифинг для Codex.
+- Текущий фокус: **Funding Scanner** на VM + **Kwork** (обложки + публикация) + **TG Monitor** (Codex будет редактировать). Детали: `CURRENT_CONTEXT.md`
+- Следующий шаг: отдать TG_MONITOR_BRIEFING.md Codex для улучшений tg-monitor.
 
 ## История изменений
+
+### 2026-03-08 — Repo docs sync + PharmOrder sozvezdie fix + TG Monitor briefing (сессия 27)
+- Что сделано:
+  - **PharmOrder sozvezdie fix**: на VPS matrix_suppliers пропадали при маминой синхронизации (product_post.dbf нет на её ПК). Фикс: server.py сохраняет matrix_suppliers из старой БД при замене sozvezdie.db. Задеплоено через paramiko, сервис перезапущен.
+  - **Cortex repo docs sync** (обсуждено → откачено → переделано с разрешением):
+    - CURRENT_CONTEXT.md создан (quick-entry layer, 20 строк)
+    - CLAUDE.md: session start → CURRENT_CONTEXT.md вместо DEV_CONTEXT.md
+    - README.md: переписан (honest personal monorepo, не "AI Corporation")
+    - AGENTS.md: переписан (Claude Code infrastructure — 14 команд, 4 агента, 7 скиллов, 8 хуков)
+    - PROJECT_CONTEXT.md: переписан (два слоя: meta + tools)
+    - ops.sh: root operational script (test/check/lint/sync/secrets/clean)
+    - .gitignore: covers/, *.db, .playwright-mcp/, *.lock добавлены
+    - pyproject.toml heartbeat/metrics: pythonpath fix (33 теста проходят)
+    - DEV_CONTEXT.md НЕ тронут (священный append-only лог)
+  - **nickCodex-READY анализ**: изучен контекст-пак для агентов (D:\code\2026\3\nickCodex-READY). Инсайты: inbox/now.md ≈ наш CURRENT_CONTEXT.md, sessions/ для разгрузки DEV_CONTEXT, runtime/ для мусора. Архитектурно Cortex уже эволюционировал в ту же сторону.
+  - **TG_MONITOR_BRIEFING.md**: полный брифинг на рабочем столе (структура, data flow, все модули, deploy, env vars) — для входа Codex в tg-monitor.
+- Файлы: CURRENT_CONTEXT.md (новый), ops.sh (новый), CLAUDE.md, README.md, AGENTS.md, PROJECT_CONTEXT.md, .gitignore, tools/heartbeat/pyproject.toml, tools/metrics/pyproject.toml, C:/Users/User/Desktop/TG_MONITOR_BRIEFING.md (новый)
 
 ### 2026-03-07 — Funding Scanner: settled filter fix + deploy (сессия 26)
 - Что сделано:
@@ -457,6 +474,12 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] Kwork Monitor: интерактивный бот (bot.py) — scan → оценка → auto-offer
 - [x] Kwork Monitor: create_kwork.py — автоматизация публикации кворков
 - [ ] Kwork: опубликовать 3 кворка
+- [x] Cortex repo docs: README, AGENTS, PROJECT_CONTEXT переписаны под реальность
+- [x] CURRENT_CONTEXT.md — quick-entry layer для старта сессий
+- [x] ops.sh — root operational script
+- [x] PharmOrder: sozvezdie matrix_suppliers preservation fix (VPS deployed)
+- [x] nickCodex-READY: анализ контекст-пака (инсайты для Cortex)
+- [x] TG Monitor: полный брифинг для Codex (TG_MONITOR_BRIEFING.md)
 - [ ] ~~Фриланс-бот~~ (отложен)
 
 ## Идеи / Backlog

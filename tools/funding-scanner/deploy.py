@@ -7,7 +7,7 @@ from pathlib import Path
 
 VM = "cortex-vm"
 ZONE = "europe-west3-b"
-REMOTE_DIR = "/opt/funding-scanner"
+REMOTE_DIR = "/home/User/funding-scanner"
 
 LOCAL_DIR = Path(__file__).parent
 FILES = [
@@ -23,25 +23,26 @@ FILES = [
 
 SYSTEMD_SCANNER = """\
 [Unit]
-Description=Funding Rate Scanner (hourly scan)
+Description=Funding Rate Scanner (1-minute scan)
 After=network.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/funding-scanner
-EnvironmentFile=/opt/funding-scanner/.env
-ExecStart=/root/.local/bin/uv run python main.py
+User=User
+WorkingDirectory=/home/User/funding-scanner
+EnvironmentFile=/home/User/funding-scanner/.env
+ExecStart=/home/User/.local/bin/uv run python main.py
 TimeoutStartSec=120
 """
 
 SYSTEMD_TIMER = """\
 [Unit]
-Description=Run Funding Scanner every hour
+Description=Run Funding Scanner every minute
 
 [Timer]
-OnCalendar=*:00:00
+OnCalendar=*-*-* *:*:00
 Persistent=true
-RandomizedDelaySec=60
+RandomizedDelaySec=10
 
 [Install]
 WantedBy=timers.target
@@ -54,9 +55,10 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/funding-scanner
-EnvironmentFile=/opt/funding-scanner/.env
-ExecStart=/root/.local/bin/uv run uvicorn web:app --host 0.0.0.0 --port 8080
+User=User
+WorkingDirectory=/home/User/funding-scanner
+EnvironmentFile=/home/User/funding-scanner/.env
+ExecStart=/home/User/.local/bin/uv run uvicorn web:app --host 0.0.0.0 --port 8080
 Restart=always
 RestartSec=10
 

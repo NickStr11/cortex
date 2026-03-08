@@ -65,3 +65,16 @@ data/tg-groups/
 
 # TG Bridge history
 tools/tg-bridge/history.json
+
+# Generated covers & assets
+tools/kwork-monitor/covers/
+
+# Runtime databases
+*.db
+
+# Playwright MCP
+.playwright-mcp/
+
+# Lock files (runtime)
+*.lock
+!uv.lock

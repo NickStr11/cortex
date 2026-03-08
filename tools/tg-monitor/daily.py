@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -30,6 +31,9 @@ from beartype import beartype
 ROOT = Path(__file__).parent.parent.parent
 HEARTBEAT_DIR = ROOT / "tools" / "heartbeat"
 TG_MONITOR_DIR = Path(__file__).parent
+HN_LINE_RE = re.compile(
+    r"^\d+\.\s+\*\*(?P<title>.+?)\*\*\s+\(score:\s*(?P<score>\d+),\s*comments:\s*(?P<comments>\d+)\)$"
+)
 
 
 @beartype
@@ -74,6 +78,109 @@ def run_heartbeat() -> str | None:
 
 
 @beartype
+def extract_hn_links(raw_heartbeat: str, limit: int = 5) -> list[tuple[str, str, int, int]]:
+    """Extract top HN stories from raw heartbeat markdown."""
+    lines = raw_heartbeat.splitlines()
+    in_hn = False
+    results: list[tuple[str, str, int, int]] = []
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("## Hacker News Top Stories"):
+            in_hn = True
+            continue
+        if in_hn and stripped.startswith("## "):
+            break
+        if not in_hn:
+            continue
+
+        match = HN_LINE_RE.match(stripped)
+        if not match:
+            continue
+        if index + 1 >= len(lines):
+            continue
+
+        url = lines[index + 1].strip()
+        if not url.startswith("http"):
+            continue
+
+        results.append((
+            match.group("title"),
+            url,
+            int(match.group("score")),
+            int(match.group("comments")),
+        ))
+        if len(results) >= limit:
+            break
+
+    return results
+
+
+@beartype
+def summarize_hn_links_ru(stories: list[tuple[str, str, int, int]]) -> str | None:
+    """Generate short Russian comments for top HN links."""
+    if not stories or not os.environ.get("GOOGLE_API_KEY"):
+        return None
+
+    from google import genai
+
+    prompt = """Ниже топовые ссылки с Hacker News.
+
+Для КАЖДОЙ ссылки дай короткий комментарий на русском:
+- 1 строка на ссылку
+- не выдумывай факты, которых нет в названии, домене, score и comments
+- можно осторожно интерпретировать, почему ссылка интересна
+- без воды, без маркетингового тона
+- сохраняй оригинальный title на английском
+
+Формат строго такой:
+### HN Ссылки
+1. [Original Title](url) — короткий русский комментарий
+2. [Original Title](url) — короткий русский комментарий
+"""
+
+    payload = "\n".join(
+        f"{index}. title={title}\nurl={url}\nscore={score}\ncomments={comments}"
+        for index, (title, url, score, comments) in enumerate(stories, start=1)
+    )
+
+    try:
+        client = genai.Client()
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=f"{prompt}\n\n{payload}",
+        )
+    except Exception as e:
+        print(f"  Heartbeat summarize error: {e}")
+        return None
+
+    text = response.text or ""
+    return text.strip() or None
+
+
+@beartype
+def format_heartbeat_for_daily(raw_heartbeat: str, date_label: str) -> str:
+    """Build a concise heartbeat block for the daily digest."""
+    hn_stories = extract_hn_links(raw_heartbeat)
+    summary = summarize_hn_links_ru(hn_stories)
+    if summary:
+        return f"*Heartbeat — {date_label}*\n\n{summary}"
+
+    if hn_stories:
+        lines = ["### HN Ссылки"]
+        for index, (title, url, score, comments) in enumerate(hn_stories, start=1):
+            lines.append(
+                f"{index}. [{title}]({url}) — HN топ: {score} points, {comments} comments."
+            )
+        return f"*Heartbeat — {date_label}*\n\n" + "\n".join(lines)
+
+    summary = raw_heartbeat[:1500]
+    if len(raw_heartbeat) > 1500:
+        summary += "\n..."
+    return f"*Heartbeat — {date_label}*\n\n{summary}"
+
+
+@beartype
 def run_tg_fetch() -> bool:
     """Fetch new messages from TG groups."""
     print("\n[2/3] Fetching TG groups...")
@@ -102,6 +209,7 @@ def run_tg_digest(dry_run: bool, hours: int) -> str | None:
             pipeline_map,
             pipeline_reduce,
             pipeline_verify,
+            has_verification_issues,
             CHUNK_SIZE,
         )
         import math
@@ -129,8 +237,8 @@ def run_tg_digest(dry_run: bool, hours: int) -> str | None:
             digest = pipeline_reduce(group_name, topics)
             # VERIFY
             verify_result = pipeline_verify(digest, top)
-            if "HALLUCINATION" in verify_result.upper():
-                print(f"    WARNING: hallucinations detected in {group_name}")
+            if has_verification_issues(verify_result):
+                print(f"    WARNING: verification flagged issues in {group_name}")
             parts.append(digest)
             print(f"    digest: {len(digest)} chars")
 
@@ -165,11 +273,7 @@ def main() -> None:
     if not args.skip_heartbeat:
         hb = run_heartbeat()
         if hb:
-            # Trim heartbeat to key findings (first 1500 chars)
-            summary = hb[:1500]
-            if len(hb) > 1500:
-                summary += "\n..."
-            parts.append(f"*Heartbeat — {now[:10]}*\n\n{summary}")
+            parts.append(format_heartbeat_for_daily(hb, now[:10]))
 
     # TG Monitor
     if not args.skip_tg:

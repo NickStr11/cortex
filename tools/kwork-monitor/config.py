@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import quote
 
 # ── Paths ──
 ROOT = Path(__file__).parent
@@ -13,13 +14,49 @@ DB_PATH = ROOT / "seen.db"
 KWORK_LOGIN = os.environ.get("KWORK_LOGIN", "")
 KWORK_PASSWORD = os.environ.get("KWORK_PASSWORD", "")
 
+
+def build_proxy_url() -> str | None:
+    proxy_url = os.environ.get("KWORK_PROXY_URL", "").strip()
+    if proxy_url:
+        return proxy_url
+
+    proxy_server = os.environ.get("KWORK_PROXY_SERVER", "").strip()
+    if not proxy_server:
+        return None
+
+    username = os.environ.get("KWORK_PROXY_USERNAME", "").strip()
+    password = os.environ.get("KWORK_PROXY_PASSWORD", "").strip()
+    if not username:
+        return proxy_server
+
+    scheme, sep, rest = proxy_server.partition("://")
+    if not sep:
+        scheme = "http"
+        rest = proxy_server
+
+    auth = quote(username, safe="")
+    if password:
+        auth += f":{quote(password, safe='')}"
+    return f"{scheme}://{auth}@{rest}"
+
+
+KWORK_PROXY = build_proxy_url()
+
 # ── Telegram ──
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_OWNER_CHAT_ID", "691773226")
+TELEGRAM_BOT_TOKEN = (
+    os.environ.get("KWORK_TELEGRAM_BOT_TOKEN")
+    or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+).strip()
+TELEGRAM_CHAT_ID = (
+    os.environ.get("KWORK_TELEGRAM_CHAT_ID")
+    or os.environ.get("TELEGRAM_OWNER_CHAT_ID")
+    or os.environ.get("TELEGRAM_CHAT_ID")
+    or "691773226"
+).strip()
 
 # ── Gemini ──
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
-GEMINI_MODEL = "gemini-2.0-flash"  # cheap & fast for evaluation
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 
 # ── Polling ──
 POLL_INTERVAL_MIN = 15  # minutes between checks
@@ -77,6 +114,8 @@ class ProjectMatch:
     price_from: int
     price_to: int
     url: str
+    buyer_username: str = ""
+    offers_count: int = 0
     category: str = ""
     matched_keywords: list[str] = field(default_factory=list)
     ai_score: int = 0        # 1-10

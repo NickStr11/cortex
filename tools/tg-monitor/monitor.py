@@ -133,7 +133,12 @@ async def run(limit: int, group_filter: str | None) -> None:
 
     groups = GROUPS
     if group_filter:
-        groups = [g for g in GROUPS if group_filter in g.identifier or group_filter in g.name.lower()]  # type: ignore[operator]
+        normalized_filter = group_filter.lower()
+        groups = [
+            g
+            for g in GROUPS
+            if normalized_filter in str(g.identifier).lower() or normalized_filter in g.name.lower()
+        ]
         if not groups:
             print(f"No group matching '{group_filter}'", file=sys.stderr)
             sys.exit(1)

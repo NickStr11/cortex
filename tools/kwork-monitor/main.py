@@ -39,6 +39,7 @@ from config import (  # noqa: E402
     KEYWORDS,
     KWORK_LOGIN,
     KWORK_PASSWORD,
+    KWORK_PROXY,
     POLL_INTERVAL_MIN,
     PRICE_MAX,
     PRICE_MIN,
@@ -98,7 +99,7 @@ async def fetch_projects() -> list[dict]:
     all_projects: list[dict] = []
     seen_ids: set[int] = set()
 
-    async with Kwork(login=login, password=password) as api:
+    async with Kwork(login=login, password=password, proxy=KWORK_PROXY) as api:
         for cat_id in CATEGORIES:
             try:
                 projects = await api.get_projects(
