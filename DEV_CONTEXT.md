@@ -1,15 +1,34 @@
 # Development Context Log
 
 ## Последнее обновление
-- Дата: 2026-03-08
+- Дата: 2026-03-09
 
 ## Текущий статус
-- Этап: Repo docs sync + PharmOrder sozvezdie fix.
-- Последнее действие: сессия 27 — документация cortex приведена в соответствие, PharmOrder sozvezdie фикс задеплоен, TG Monitor брифинг для Codex.
-- Текущий фокус: **Funding Scanner** на VM + **Kwork** (обложки + публикация) + **TG Monitor** (Codex будет редактировать). Детали: `CURRENT_CONTEXT.md`
-- Следующий шаг: отдать TG_MONITOR_BRIEFING.md Codex для улучшений tg-monitor.
+- Этап: Repo hygiene + TG digest v2 + funding-scanner cleanup.
+- Последнее действие: сессия 28 — Codex architectural review → repo invariants в CLAUDE.md, daily digest v2 (Reddit + X/Twitter) задеплоен на VM, funding-scanner удалён из cortex (развивается отдельно в D:\code\2026\3\funding-scanner).
+- Текущий фокус: **Kwork** (обложки + публикация, пилится с Codex) + **Funding Scanner** (отдельный репо). Детали: `CURRENT_CONTEXT.md`
+- Следующий шаг: Kwork обложки + публикация кворков (с Codex). Funding scanner: починить латентный баг (db.py schema missing price/next_funding_ts columns).
 
 ## История изменений
+
+### 2026-03-09 — Repo invariants + TG digest v2 + funding-scanner cleanup (сессия 28)
+- Что сделано:
+  - **Codex architectural review**: проанализирован ревью Codex (gpt-5.3-codex xhigh). Согласились ~40%: dirty worktree, encoding, root clutter. Отклонили ~60%: split monorepo, vendor-neutral абстракции — overengineering.
+  - **CLAUDE.md — section 0 "Repo Invariants"**: repo invariants (personal monorepo, .claude/ = platform, tools/ = products), instruction precedence (5 уровней), context loading rules (lazy loading), placement table (куда что писать), structural review order (hygiene-first).
+  - **Root cleanup**: ops.sh, start.bat, screenshot.bat → scripts/. AGENTS.md trimmed (убрана дупликация CLAUDE.md).
+  - **TG Digest v2** (daily.py):
+    - Reddit: `extract_reddit_posts()` + `summarize_reddit_links_ru()` — парсинг из heartbeat + Gemini summary
+    - X/Twitter: `fetch_x_ai_trends()` — Gemini grounded search (google_search tool) для AI трендов
+    - DRY: `summarize_links_ru()` — общая функция для HN + Reddit
+    - VERIFY: теперь использует все filtered messages (не top-50)
+    - heartbeat/config.py: +3 subreddit (ClaudeAI, singularity, AutomateYourself)
+  - **Deploy на VM**: задеплоен, timer confirmed (03:00 UTC / 06:00 MSK)
+  - **Funding scanner comparison**: standalone (D:\code\2026\3\funding-scanner) = эволюция cortex-копии. Price spread, break-even days, UTC+8, Aether dashboard. Cortex-копия stale.
+  - **Funding scanner удалён** из cortex (15 файлов, 3703 строк). Развивается отдельно.
+  - **Латентный баг найден**: standalone funding-scanner db.py schema missing `price` и `next_funding_ts` columns → fresh deploy упадёт.
+  - **Kwork comparison**: изучен D:\code\2026\3\kwork (Codex version) vs cortex kwork-monitor. Codex version значительно зрелее (production pipeline vs prototype).
+- Файлы: CLAUDE.md (invariants), AGENTS.md (trimmed), scripts/ (ops.sh, start.bat, screenshot.bat — moved), tools/tg-monitor/daily.py (Reddit + X/Twitter + DRY), tools/tg-monitor/digest.py (full verify), tools/heartbeat/config.py (+3 subs), tools/funding-scanner/ (DELETED)
+- Коммиты: bf9b0d2 (repo invariants), 6036d27 (CURRENT_CONTEXT), c781343 (daily digest v2)
 
 ### 2026-03-08 — Repo docs sync + PharmOrder sozvezdie fix + TG Monitor briefing (сессия 27)
 - Что сделано:
@@ -382,8 +401,8 @@ architect, code-reviewer, security-auditor, verify-agent
 ### Хуки (8)
 check-secrets, check-filesize, pre-commit-check, protect-main, grab-screenshot, output-secret-filter, mcp-usage-tracker, expensive-tool-warning
 
-### Tools (6)
-heartbeat (HN/Reddit/GitHub trends), pipeline (DEV_CONTEXT → article → Telegram), tg-monitor (TG groups → digest → Telegram), tg-bridge (Telegram → Claude Code bridge), funding-scanner (12 бирж × 21 монета, web dashboard, VM deploy), kwork-monitor (auto-scan + AI оценка + TG бот)
+### Tools (5)
+heartbeat (HN/Reddit/GitHub trends), pipeline (DEV_CONTEXT → article → Telegram), tg-monitor (TG groups + HN + Reddit + X/Twitter → digest → Telegram), tg-bridge (Telegram → Claude Code bridge), kwork-monitor (auto-scan + AI оценка + TG бот)
 
 ### Workflows (4)
 heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigger), pipeline.yml (DEV_CONTEXT → Telegram)
@@ -466,10 +485,10 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - [x] Git housekeeping: 7 непушнутых коммитов main → синхронизированы
 - [x] Cleanup репо: 46 мусорных файлов удалены
 - [x] Субагент-playbook: правила делегирования в CLAUDE.md + memory
-- [x] Funding Rate Scanner: полный стек (12 бирж, 21 монета, SQLite, FastAPI web dashboard)
-- [x] Funding Rate Scanner: backfill 30 дней settled rates + daily timer
-- [x] Funding Rate Scanner: deploy на VM (34.159.55.61:8080, systemd service + timer)
-- [x] Funding Rate Scanner: верификация vs референс (30d delta <0.3%)
+- [x] Funding Rate Scanner: полный стек → мигрирован в D:\code\2026\3\funding-scanner (удалён из cortex)
+- [x] Repo invariants: CLAUDE.md section 0 (instruction precedence, context loading, placement table)
+- [x] Root cleanup: scripts → scripts/, AGENTS.md trimmed
+- [x] TG Digest v2: Reddit + X/Twitter + full verify (deployed на VM)
 - [x] Kwork Monitor: auto-scan Kwork API + Gemini AI оценка + TG алерты
 - [x] Kwork Monitor: интерактивный бот (bot.py) — scan → оценка → auto-offer
 - [x] Kwork Monitor: create_kwork.py — автоматизация публикации кворков
