@@ -1,71 +1,82 @@
-# Cortex — AI Orchestration System
+# Cortex — Claude Code Infrastructure
 
-## Project Overview
+## Что здесь
 
-Cortex is a personal AI corporation system. It orchestrates AI agents (Jules, Codex, Claude) via GitHub Issues. The human acts as CEO — sets goals, reviews PRs, merges. Agents do the actual work.
+Cortex содержит переносимую Claude Code обвязку: commands, agents, skills, hooks.
+Всё живёт в `.claude/` и работает в любом проекте через dotfiles-claude.
 
-## Architecture
+## Commands (14)
 
-```
-/council (Claude CLI) → generates tasks by role (CPO/CTO/CMO/Growth)
-/dispatch (Claude CLI) → creates GitHub Issues with agent labels
-GitHub Issues          → queue of tasks for agents
-Jules / Codex          → pick up tasks, write code, create PRs
-Human                  → reviews PRs, merges
-```
+Slash-команды для Claude Code CLI:
 
-## Tech Stack
+| Команда | Назначение |
+|---------|------------|
+| `/council` | AI-консилиум (CPO/CTO/CMO) → генерация задач |
+| `/dispatch` | Создание GitHub Issues с назначением агентов |
+| `/heartbeat` | Сканер трендов (HN, GitHub, Reddit, Product Hunt) |
+| `/status` | Статус проекта |
+| `/verify` | Проверка качества кода (build, types, lint, tests, security) |
+| `/handoff` | Сохранение прогресса перед сменой сессии |
+| `/quick-commit` | Быстрый Git workflow |
+| `/tg-digest` | Telegram digest через Gemini |
+| `/new-project` | Scaffold нового проекта |
+| `/screenshot` | Скриншот из буфера обмена |
+| `/tdd` | Test-Driven Development workflow |
+| `/build-fix` | Диагностика и починка ошибок билда |
+| `/learn` | Мета-обучение: анализ паттернов работы |
+| `/metrics` | Трекинг эффективности агентов |
 
-- Language: Python 3.12+
-- Package manager: uv
-- Type checking: pyright (strict)
-- Runtime types: beartype
-- CLI: Claude Code (slash commands in .claude/commands/)
-- Agents: Jules (Google), Codex (OpenAI), Claude Code Action
-- PM: GitHub Issues + Projects
+## Agents (4)
 
-## Repository Structure
+Specs в `.claude/agents/` — используются как субагенты через Task tool:
 
-```
-.claude/commands/    — Claude Code slash commands (/council, /dispatch, /heartbeat, /status)
-.github/workflows/   — GitHub Actions (heartbeat cron)
-docs/                — project documentation
-tools/heartbeat/     — AI/Tech trend scanner (HN + GitHub)
-tools/               — utility scripts
-AGENTS.md            — this file (context for AI agents)
-PROJECT_CONTEXT.md   — project goals and roadmap
-DEV_CONTEXT.md       — development log and current status
-```
+- **architect** — планирование архитектуры и стека
+- **code-reviewer** — ревью кода (качество, безопасность, читаемость)
+- **security-auditor** — аудит безопасности перед деплоем
+- **verify-agent** — проверка Definition of Done
 
-## Current Status
+## Skills (7)
 
-Early stage. Setting up the orchestration infrastructure:
-- [x] Project initialized
-- [x] /council slash command created
-- [ ] /dispatch slash command
-- [ ] GitHub Actions for auto-triggering agents
-- [ ] First full cycle: plan → issue → PR → merge
+В `.claude/skills/`:
+
+- **systematic-debugging** — 4-фазный root cause analysis (из obra/superpowers)
+- **subagent-dev** — fresh subagent per task + двойной review
+- **parallel-agents** — dispatch агента на каждый независимый домен
+- **banana** — генерация изображений через Gemini Pro Image
+- **screenshot**, **frontend-design**, **webapp-testing** — project skills
+
+## Hooks (8)
+
+Git hooks в `.claude/hooks/`:
+
+- `check-secrets` — блокировка коммитов с API ключами
+- `protect-main` — защита main ветки
+- `check-filesize` — лимит размера файлов
+- `pre-commit-check` — pre-commit валидация
+- `output-secret-filter` — фильтрация секретов из output
+- `mcp-usage-tracker` — мониторинг использования MCP
+- `expensive-tool-warning` — предупреждение о дорогих операциях
+- `grab-screenshot` — автозахват скриншотов
+
+## Workflows (4)
+
+GitHub Actions в `.github/workflows/`:
+
+- `heartbeat.yml` — cron сканер трендов (каждые 3 дня)
+- `code-review.yml` — auto-review Pull Requests
+- `jules-trigger.yml` — триггер Jules по label на Issue
+- `pipeline.yml` — контент-пайплайн (DEV_CONTEXT → Telegram)
+
+## External Agents
+
+- **Jules** (Google) — надёжен для кода и рефакторинга, бесплатный тир
+- **Codex CLI MCP** — второе мнение, веб-поиск, reasoningEffort: xhigh
+- **Codex GitHub App** — слабый, годится только для доков/шаблонов
 
 ## Rules for Agents
 
-1. **Always read PROJECT_CONTEXT.md** before starting work to understand current goals
-2. **Small focused PRs** — one task per PR, no scope creep
-3. **Python files** must start with `from __future__ import annotations` and use `@beartype`
-4. **No secrets** in code — use environment variables
-5. **Conventional commits**: `feat(scope): description` / `fix(scope): description`
-6. **Max file size**: 700 lines, max function: 70 lines
+> Полные правила — в `CLAUDE.md`. Здесь только quick reference.
 
-## How to Assign Tasks to Jules
-
-Add label `jules` to any GitHub Issue. Jules will:
-1. Read the issue description
-2. Explore the codebase
-3. Implement the solution
-4. Create a Pull Request
-
-## Definition of Done
-
-- [ ] `/council` generates tasks from PROJECT_CONTEXT.md
-- [ ] `/dispatch` creates Issues with correct labels/assignees
-- [ ] At least one agent (Jules or Codex) successfully makes a PR from an issue
-- [ ] Full cycle works: plan → issue → PR → merge
+- Читай `CURRENT_CONTEXT.md` перед работой
+- Conventional commits: `feat(scope): description`
+- Python: `@beartype` + type annotations
