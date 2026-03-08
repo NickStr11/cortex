@@ -310,7 +310,7 @@ def pipeline_reduce(group_name: str, topics: list[str]) -> str:
 @beartype
 def pipeline_verify(digest: str, messages: list[dict[str, object]]) -> str:
     """VERIFY: fact-check digest against source messages (fast model)."""
-    source = format_chunk(messages[:50])  # top-50 for context window
+    source = format_chunk(messages)  # all filtered messages for accurate verification
     content = f"ДАЙДЖЕСТ:\n{digest}\n\nИСХОДНЫЕ СООБЩЕНИЯ:\n{source}"
     print("    VERIFY (fact-check)...")
     return call_gemini(VERIFY_PROMPT, content, model=GEMINI_MODEL_FAST)

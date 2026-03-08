@@ -34,6 +34,9 @@ TG_MONITOR_DIR = Path(__file__).parent
 HN_LINE_RE = re.compile(
     r"^\d+\.\s+\*\*(?P<title>.+?)\*\*\s+\(score:\s*(?P<score>\d+),\s*comments:\s*(?P<comments>\d+)\)$"
 )
+REDDIT_LINE_RE = re.compile(
+    r"^\d+\.\s+\*\*(?P<title>.+?)\*\*\s+\(score:\s*(?P<score>\d+),\s*comments:\s*(?P<comments>\d+),\s*r/(?P<subreddit>\S+)\)$"
+)
 
 
 @beartype
@@ -117,14 +120,58 @@ def extract_hn_links(raw_heartbeat: str, limit: int = 5) -> list[tuple[str, str,
 
 
 @beartype
-def summarize_hn_links_ru(stories: list[tuple[str, str, int, int]]) -> str | None:
-    """Generate short Russian comments for top HN links."""
+def extract_reddit_posts(raw_heartbeat: str, limit: int = 5) -> list[tuple[str, str, int, int, str]]:
+    """Extract top Reddit posts from raw heartbeat markdown."""
+    lines = raw_heartbeat.splitlines()
+    in_reddit = False
+    results: list[tuple[str, str, int, int, str]] = []
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("## Reddit Top Posts"):
+            in_reddit = True
+            continue
+        if in_reddit and stripped.startswith("## "):
+            break
+        if not in_reddit:
+            continue
+
+        match = REDDIT_LINE_RE.match(stripped)
+        if not match:
+            continue
+        if index + 1 >= len(lines):
+            continue
+
+        url = lines[index + 1].strip()
+        if not url.startswith("http"):
+            continue
+
+        results.append((
+            match.group("title"),
+            url,
+            int(match.group("score")),
+            int(match.group("comments")),
+            match.group("subreddit"),
+        ))
+        if len(results) >= limit:
+            break
+
+    return results
+
+
+@beartype
+def summarize_links_ru(
+    stories: list[tuple[str, str, int, int]] | list[tuple[str, str, int, int, str]],
+    source_name: str,
+    header: str,
+) -> str | None:
+    """Generate short Russian comments for links from any source."""
     if not stories or not os.environ.get("GOOGLE_API_KEY"):
         return None
 
     from google import genai
 
-    prompt = """Ниже топовые ссылки с Hacker News.
+    prompt = f"""Ниже топовые ссылки с {source_name}.
 
 Для КАЖДОЙ ссылки дай короткий комментарий на русском:
 - 1 строка на ссылку
@@ -134,24 +181,27 @@ def summarize_hn_links_ru(stories: list[tuple[str, str, int, int]]) -> str | Non
 - сохраняй оригинальный title на английском
 
 Формат строго такой:
-### HN Ссылки
+### {header}
 1. [Original Title](url) — короткий русский комментарий
 2. [Original Title](url) — короткий русский комментарий
 """
 
-    payload = "\n".join(
-        f"{index}. title={title}\nurl={url}\nscore={score}\ncomments={comments}"
-        for index, (title, url, score, comments) in enumerate(stories, start=1)
-    )
+    payload_lines: list[str] = []
+    for index, story in enumerate(stories, start=1):
+        title, url, score, comments = story[0], story[1], story[2], story[3]
+        extra = f"\nsubreddit=r/{story[4]}" if len(story) > 4 else ""
+        payload_lines.append(
+            f"{index}. title={title}\nurl={url}\nscore={score}\ncomments={comments}{extra}"
+        )
 
     try:
         client = genai.Client()
         response = client.models.generate_content(
             model="gemini-2.0-flash",
-            contents=f"{prompt}\n\n{payload}",
+            contents=f"{prompt}\n\n" + "\n".join(payload_lines),
         )
     except Exception as e:
-        print(f"  Heartbeat summarize error: {e}")
+        print(f"  {source_name} summarize error: {e}")
         return None
 
     text = response.text or ""
@@ -159,25 +209,106 @@ def summarize_hn_links_ru(stories: list[tuple[str, str, int, int]]) -> str | Non
 
 
 @beartype
+def summarize_hn_links_ru(stories: list[tuple[str, str, int, int]]) -> str | None:
+    """Generate short Russian comments for top HN links."""
+    return summarize_links_ru(stories, "Hacker News", "HN Ссылки")
+
+
+@beartype
+def summarize_reddit_links_ru(stories: list[tuple[str, str, int, int, str]]) -> str | None:
+    """Generate short Russian comments for top Reddit posts."""
+    return summarize_links_ru(stories, "Reddit", "Reddit Ссылки")
+
+
+@beartype
+def fetch_x_ai_trends() -> str | None:
+    """Fetch AI/agents/automation trends from X/Twitter via Gemini grounded search."""
+    if not os.environ.get("GOOGLE_API_KEY"):
+        return None
+
+    from google import genai
+    from google.genai import types
+
+    print("  Fetching X/Twitter AI trends via Gemini Search...")
+
+    prompt = """Найди 5-7 самых обсуждаемых постов в Twitter/X за последние 24 часа
+по темам: AI agents, AI automation, AI business cases, LLM, Claude, GPT, Codex.
+
+Для каждого поста:
+- автор (@handle)
+- суть поста (1 строка на русском)
+- ссылка если есть
+- примерный engagement (likes/reposts если видно)
+
+Формат:
+### X/Twitter Тренды
+1. @handle — суть поста на русском
+2. @handle — суть поста на русском
+
+Если конкретных постов не нашлось — дай топ обсуждаемые темы по AI в Twitter.
+Не выдумывай посты и авторов. Если данных мало — так и скажи."""
+
+    try:
+        client = genai.Client()
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
+        )
+        text = response.text or ""
+        return text.strip() or None
+    except Exception as e:
+        print(f"  X/Twitter trends error: {e}")
+        return None
+
+
+@beartype
 def format_heartbeat_for_daily(raw_heartbeat: str, date_label: str) -> str:
     """Build a concise heartbeat block for the daily digest."""
-    hn_stories = extract_hn_links(raw_heartbeat)
-    summary = summarize_hn_links_ru(hn_stories)
-    if summary:
-        return f"*Heartbeat — {date_label}*\n\n{summary}"
+    sections: list[str] = []
 
-    if hn_stories:
+    # HN
+    hn_stories = extract_hn_links(raw_heartbeat)
+    hn_summary = summarize_hn_links_ru(hn_stories)
+    if hn_summary:
+        sections.append(hn_summary)
+    elif hn_stories:
         lines = ["### HN Ссылки"]
         for index, (title, url, score, comments) in enumerate(hn_stories, start=1):
             lines.append(
-                f"{index}. [{title}]({url}) — HN топ: {score} points, {comments} comments."
+                f"{index}. [{title}]({url}) — {score} points, {comments} comments"
             )
-        return f"*Heartbeat — {date_label}*\n\n" + "\n".join(lines)
+        sections.append("\n".join(lines))
 
-    summary = raw_heartbeat[:1500]
+    # Reddit
+    reddit_posts = extract_reddit_posts(raw_heartbeat)
+    reddit_summary = summarize_reddit_links_ru(reddit_posts)
+    if reddit_summary:
+        sections.append(reddit_summary)
+    elif reddit_posts:
+        lines = ["### Reddit Ссылки"]
+        for index, (title, url, score, comments, sub) in enumerate(reddit_posts, start=1):
+            lines.append(
+                f"{index}. [{title}]({url}) — r/{sub}, {score} points, {comments} comments"
+            )
+        sections.append("\n".join(lines))
+
+    # X/Twitter (via Gemini grounded search)
+    x_trends = fetch_x_ai_trends()
+    if x_trends:
+        sections.append(x_trends)
+
+    if sections:
+        body = "\n\n".join(sections)
+        return f"*Heartbeat — {date_label}*\n\n{body}"
+
+    # Fallback: raw heartbeat truncated
+    fallback = raw_heartbeat[:1500]
     if len(raw_heartbeat) > 1500:
-        summary += "\n..."
-    return f"*Heartbeat — {date_label}*\n\n{summary}"
+        fallback += "\n..."
+    return f"*Heartbeat — {date_label}*\n\n{fallback}"
 
 
 @beartype

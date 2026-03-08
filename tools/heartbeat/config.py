@@ -45,7 +45,10 @@ GITHUB_LOOKBACK_DAYS = 3
 GITHUB_RESULTS_LIMIT = 15
 
 # Reddit
-REDDIT_SUBREDDITS = ["MachineLearning", "artificial", "LocalLLaMA", "ChatGPT"]
+REDDIT_SUBREDDITS = [
+    "MachineLearning", "artificial", "LocalLLaMA", "ChatGPT",
+    "ClaudeAI", "singularity", "AutomateYourself",
+]
 REDDIT_RESULTS_LIMIT = 20
 
 # Product Hunt
