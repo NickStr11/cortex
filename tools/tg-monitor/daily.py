@@ -25,6 +25,8 @@ from pathlib import Path
 if sys.stdout.encoding != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
+import time
+
 import httpx
 from beartype import beartype
 
@@ -176,6 +178,7 @@ def summarize_links_ru(
 Для КАЖДОЙ ссылки дай короткий комментарий на русском:
 - 1 строка на ссылку
 - не выдумывай факты, которых нет в названии, домене, score и comments
+- не добавляй свои оценки, скепсис, вопросы или мета-комментарии (типа "статья из будущего?", "спорно", "интересно, что...")
 - можно осторожно интерпретировать, почему ссылка интересна
 - без воды, без маркетингового тона
 - сохраняй оригинальный title на английском
@@ -194,18 +197,24 @@ def summarize_links_ru(
             f"{index}. title={title}\nurl={url}\nscore={score}\ncomments={comments}{extra}"
         )
 
-    try:
-        client = genai.Client()
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=f"{prompt}\n\n" + "\n".join(payload_lines),
-        )
-    except Exception as e:
-        print(f"  {source_name} summarize error: {e}")
-        return None
+    contents = f"{prompt}\n\n" + "\n".join(payload_lines)
+    text: str = ""
+    for attempt in range(2):
+        try:
+            client = genai.Client()
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=contents,
+            )
+            text = (response.text or "").strip()
+            if text:
+                break
+        except Exception as e:
+            print(f"  {source_name} summarize error (attempt {attempt + 1}): {e}")
+            if attempt == 0:
+                time.sleep(2)
 
-    text = response.text or ""
-    return text.strip() or None
+    return text or None
 
 
 @beartype
@@ -218,6 +227,14 @@ def summarize_hn_links_ru(stories: list[tuple[str, str, int, int]]) -> str | Non
 def summarize_reddit_links_ru(stories: list[tuple[str, str, int, int, str]]) -> str | None:
     """Generate short Russian comments for top Reddit posts."""
     return summarize_links_ru(stories, "Reddit", "Reddit Ссылки")
+
+
+@beartype
+def _validate_summary(summary: str, expected_links: int) -> bool:
+    """Check that summary contains real markdown links (at least 50% of expected)."""
+    link_count = len(re.findall(r"\[.+?\]\(https?://.+?\)", summary))
+    min_required = max(1, expected_links // 2)
+    return link_count >= min_required
 
 
 @beartype
@@ -245,8 +262,8 @@ def fetch_x_ai_trends() -> str | None:
 1. @handle — суть поста на русском
 2. @handle — суть поста на русском
 
-Если конкретных постов не нашлось — дай топ обсуждаемые темы по AI в Twitter.
-Не выдумывай посты и авторов. Если данных мало — так и скажи."""
+Если конкретных постов не нашлось — верни только слово EMPTY.
+Не выдумывай посты и авторов."""
 
     try:
         client = genai.Client()
@@ -257,8 +274,15 @@ def fetch_x_ai_trends() -> str | None:
                 tools=[types.Tool(google_search=types.GoogleSearch())],
             ),
         )
-        text = response.text or ""
-        return text.strip() or None
+        text = (response.text or "").strip()
+        if not text:
+            return None
+        # Filter out empty/failed responses
+        fail_markers = ["не удалось найти", "к сожалению", "EMPTY"]
+        if any(m in text for m in fail_markers) and "@" not in text:
+            print("  X/Twitter: no real data, skipping")
+            return None
+        return text
     except Exception as e:
         print(f"  X/Twitter trends error: {e}")
         return None
@@ -270,35 +294,44 @@ def format_heartbeat_for_daily(raw_heartbeat: str, date_label: str) -> str:
     sections: list[str] = []
 
     # HN
-    hn_stories = extract_hn_links(raw_heartbeat)
-    hn_summary = summarize_hn_links_ru(hn_stories)
-    if hn_summary:
-        sections.append(hn_summary)
-    elif hn_stories:
-        lines = ["### HN Ссылки"]
-        for index, (title, url, score, comments) in enumerate(hn_stories, start=1):
-            lines.append(
-                f"{index}. [{title}]({url}) — {score} points, {comments} comments"
-            )
-        sections.append("\n".join(lines))
+    try:
+        hn_stories = extract_hn_links(raw_heartbeat, limit=10)
+        hn_summary = summarize_hn_links_ru(hn_stories)
+        if hn_summary and _validate_summary(hn_summary, len(hn_stories)):
+            sections.append(hn_summary)
+        elif hn_stories:
+            lines = ["### HN Ссылки"]
+            for index, (title, url, score, comments) in enumerate(hn_stories, start=1):
+                lines.append(
+                    f"{index}. [{title}]({url}) — {score} points, {comments} comments"
+                )
+            sections.append("\n".join(lines))
+    except Exception as e:
+        print(f"  HN section error: {e}")
 
     # Reddit
-    reddit_posts = extract_reddit_posts(raw_heartbeat)
-    reddit_summary = summarize_reddit_links_ru(reddit_posts)
-    if reddit_summary:
-        sections.append(reddit_summary)
-    elif reddit_posts:
-        lines = ["### Reddit Ссылки"]
-        for index, (title, url, score, comments, sub) in enumerate(reddit_posts, start=1):
-            lines.append(
-                f"{index}. [{title}]({url}) — r/{sub}, {score} points, {comments} comments"
-            )
-        sections.append("\n".join(lines))
+    try:
+        reddit_posts = extract_reddit_posts(raw_heartbeat)
+        reddit_summary = summarize_reddit_links_ru(reddit_posts)
+        if reddit_summary and _validate_summary(reddit_summary, len(reddit_posts)):
+            sections.append(reddit_summary)
+        elif reddit_posts:
+            lines = ["### Reddit Ссылки"]
+            for index, (title, url, score, comments, sub) in enumerate(reddit_posts, start=1):
+                lines.append(
+                    f"{index}. [{title}]({url}) — r/{sub}, {score} points, {comments} comments"
+                )
+            sections.append("\n".join(lines))
+    except Exception as e:
+        print(f"  Reddit section error: {e}")
 
     # X/Twitter (via Gemini grounded search)
-    x_trends = fetch_x_ai_trends()
-    if x_trends:
-        sections.append(x_trends)
+    try:
+        x_trends = fetch_x_ai_trends()
+        if x_trends:
+            sections.append(x_trends)
+    except Exception as e:
+        print(f"  X/Twitter section error: {e}")
 
     if sections:
         body = "\n\n".join(sections)
