@@ -576,13 +576,13 @@ def notebooklm_deep_research(
             except (json.JSONDecodeError, KeyError):
                 pass
 
-    # Add TG digest as text source
+    # Add TG chat as text source (raw messages or digest)
     tg_tmp: str | None = None
     if tg_digest:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".md", delete=False, encoding="utf-8",
         ) as f:
-            f.write(f"# Telegram AI Communities Digest\n\n{tg_digest}")
+            f.write(tg_digest)  # already has header from _collect_raw_chat or digest
             tg_tmp = f.name
         rc, out = _nlm_cmd("source", "add", tg_tmp, "--json", timeout=30)
         if rc == 0:
@@ -621,15 +621,19 @@ def notebooklm_deep_research(
         "Конкретные тулы, библиотеки, продукты которые набирают тягу. "
         "Ссылки если есть.\n\n"
         "## Из Telegram-сообщества\n"
-        "Ключевые обсуждения и инсайты из русскоязычных AI-чатов "
-        "(если есть в источниках).\n\n"
+        "Живые обсуждения из русскоязычных AI-чатов. "
+        "Цитируй реальные высказывания участников, покажи о чём спорят, "
+        "что пробуют, какие инструменты обсуждают. "
+        "Упоминай имена авторов интересных мыслей.\n\n"
         "## Что стоит проверить\n"
         "2-3 темы которые стоит изучить глубже.\n\n"
         "Правила:\n"
         "- Только факты из источников, не выдумывай\n"
         "- Конкретика > абстракции\n"
         "- Если тема есть в нескольких источниках — отметь это\n"
-        "- Ссылки на оригинальные статьи где возможно"
+        "- Ссылки на оригинальные статьи где возможно\n"
+        "- Telegram-источник — это ЖИВОЙ ЧАТ, не саммари. "
+        "Цитируй, передавай атмосферу, показывай реальные мнения людей"
     )
 
     rc, out = _nlm_cmd("ask", analysis_prompt, "--json", timeout=90)
@@ -643,6 +647,52 @@ def notebooklm_deep_research(
         return result_text if result_text else None
     except json.JSONDecodeError:
         return out if out else None
+
+
+@beartype
+def _collect_raw_chat(hours: int) -> str | None:
+    """Collect enriched+filtered TG messages as readable chat log for NotebookLM."""
+    try:
+        sys.path.insert(0, str(TG_MONITOR_DIR))
+        from digest import load_recent_messages, enrich_messages, filter_top_messages
+
+        groups_messages = load_recent_messages(hours)
+        if not groups_messages:
+            return None
+
+        all_lines: list[str] = []
+        for group_name, messages in groups_messages.items():
+            enriched = enrich_messages(messages)
+            top = filter_top_messages(enriched)
+            if len(top) < 5:
+                top = sorted(enriched, key=lambda m: str(m.get("date", "")))
+
+            all_lines.append(f"\n## {group_name}\n")
+            for msg in top[:80]:  # cap per group
+                sender = msg.get("sender_name", "?")
+                text = str(msg.get("text", "")).strip()
+                date = str(msg.get("date", ""))[:16]
+                if not text or len(text) < 10:
+                    continue
+                # Truncate very long messages
+                if len(text) > 500:
+                    text = text[:500] + "..."
+                reply_ctx = ""
+                if msg.get("reply_to_text"):
+                    reply_text = str(msg["reply_to_text"])[:100]
+                    reply_sender = msg.get("reply_to_sender", "?")
+                    reply_ctx = f" [в ответ {reply_sender}: {reply_text}]"
+                all_lines.append(f"[{date}] {sender}{reply_ctx}: {text}")
+
+        if not all_lines:
+            return None
+
+        raw_chat = "# Telegram AI Communities — Live Chat\n" + "\n".join(all_lines)
+        print(f"  Raw chat log: {len(raw_chat)} chars, {len(all_lines)} lines")
+        return raw_chat
+    except Exception as e:
+        print(f"  Raw chat collect error: {e}")
+        return None
 
 
 def main() -> None:
@@ -679,17 +729,21 @@ def main() -> None:
 
     # Phase 2: TG Monitor
     tg_digest_text: str | None = None
+    tg_raw_chat: str | None = None
     if not args.skip_tg:
         run_tg_fetch()
+        tg_raw_chat = _collect_raw_chat(args.hours)
         tg_digest_text = run_tg_digest(args.dry_run, args.hours)
 
     # Phase 3: Deep research via NotebookLM (or fallback to Gemini)
     parts: list[str] = []
     used_nlm = False
 
-    if not args.no_nlm and (hn_links or reddit_links or tg_digest_text):
+    # Prefer raw chat for NotebookLM (живее), fallback digest for Gemini
+    nlm_tg_source = tg_raw_chat or tg_digest_text
+    if not args.no_nlm and (hn_links or reddit_links or nlm_tg_source):
         print("\n[4/4] NotebookLM deep research...")
-        deep = notebooklm_deep_research(hn_links, reddit_links, tg_digest_text, date_label)
+        deep = notebooklm_deep_research(hn_links, reddit_links, nlm_tg_source, date_label)
         if deep:
             parts.append(f"# AI Intelligence Briefing — {date_label}\n\n{deep}")
             # Append source links
