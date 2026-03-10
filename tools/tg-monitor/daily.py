@@ -1,15 +1,17 @@
-"""Daily Digest Runner — combines heartbeat + tg-monitor into one run.
+"""Daily Digest Runner — combines heartbeat + tg-monitor + NotebookLM deep research.
 
 Usage:
-    uv run python tools/tg-monitor/daily.py                    # full run
+    uv run python tools/tg-monitor/daily.py                    # full run (with NotebookLM)
     uv run python tools/tg-monitor/daily.py --dry-run          # no telegram
     uv run python tools/tg-monitor/daily.py --skip-heartbeat   # tg-monitor only
     uv run python tools/tg-monitor/daily.py --skip-tg          # heartbeat only
+    uv run python tools/tg-monitor/daily.py --no-nlm           # skip NotebookLM, use old Gemini
 
 Requires env:
     TG_API_ID, TG_API_HASH          — for Telethon userbot
     GOOGLE_API_KEY                  — for Gemini digest
     TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID — for sending
+    notebooklm CLI in PATH          — for deep research (optional, falls back to Gemini)
 """
 from __future__ import annotations
 
@@ -38,6 +40,17 @@ HN_LINE_RE = re.compile(
 )
 REDDIT_LINE_RE = re.compile(
     r"^\d+\.\s+\*\*(?P<title>.+?)\*\*\s+\(score:\s*(?P<score>\d+),\s*comments:\s*(?P<comments>\d+),\s*r/(?P<subreddit>\S+)\)$"
+)
+MARKDOWN_LINK_LINE_RE = re.compile(r"^\d+\.\s+\[.+?\]\(https?://.+?\)\s+—\s+.+$")
+X_TREND_LINE_RE = re.compile(r"^\d+\.\s+@[\w.]+.*—\s+.+$")
+X_FAIL_MARKERS = (
+    "к сожалению",
+    "не могу получить доступ",
+    "не могу предоставить",
+    "не удалось найти",
+    "общую информацию",
+    "основано на анализе результатов поиска",
+    "поскольку конкретные посты не найдены",
 )
 
 
@@ -238,6 +251,71 @@ def _validate_summary(summary: str, expected_links: int) -> bool:
 
 
 @beartype
+def _sanitize_link_section(summary: str, header: str, expected_links: int) -> str | None:
+    """Keep only a clean markdown section with numbered links."""
+    lines = summary.splitlines()
+    try:
+        start_index = next(i for i, line in enumerate(lines) if line.strip() == f"### {header}")
+    except StopIteration:
+        return None
+
+    sanitized = [f"### {header}"]
+    item_count = 0
+
+    for line in lines[start_index + 1:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if MARKDOWN_LINK_LINE_RE.match(stripped):
+            sanitized.append(stripped)
+            item_count += 1
+            continue
+        if stripped.startswith("### ") and item_count > 0:
+            break
+        if item_count > 0:
+            break
+
+    min_required = max(1, expected_links // 2) if expected_links > 0 else 1
+    if item_count < min_required:
+        return None
+    return "\n".join(sanitized)
+
+
+@beartype
+def _sanitize_x_section(summary: str) -> str | None:
+    """Keep only a clean X/Twitter section, skip fallback chatter."""
+    lowered = summary.lower()
+    if any(marker in lowered for marker in X_FAIL_MARKERS):
+        return None
+
+    lines = summary.splitlines()
+    try:
+        start_index = next(i for i, line in enumerate(lines) if line.strip() == "### X/Twitter Тренды")
+    except StopIteration:
+        return None
+
+    sanitized = ["### X/Twitter Тренды"]
+    item_count = 0
+
+    for line in lines[start_index + 1:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if X_TREND_LINE_RE.match(stripped):
+            sanitized.append(stripped)
+            item_count += 1
+            continue
+        if stripped.startswith("### ") and item_count > 0:
+            break
+        if item_count > 0:
+            break
+
+    if item_count < 2:
+        return None
+    return "\n".join(sanitized)
+
+
+@beartype
 def fetch_x_ai_trends() -> str | None:
     """Fetch AI/agents/automation trends from X/Twitter via Gemini grounded search."""
     if not os.environ.get("GOOGLE_API_KEY"):
@@ -297,8 +375,13 @@ def format_heartbeat_for_daily(raw_heartbeat: str, date_label: str) -> str:
     try:
         hn_stories = extract_hn_links(raw_heartbeat, limit=10)
         hn_summary = summarize_hn_links_ru(hn_stories)
-        if hn_summary and _validate_summary(hn_summary, len(hn_stories)):
-            sections.append(hn_summary)
+        clean_hn_summary = (
+            _sanitize_link_section(hn_summary, "HN Ссылки", len(hn_stories))
+            if hn_summary and _validate_summary(hn_summary, len(hn_stories))
+            else None
+        )
+        if clean_hn_summary:
+            sections.append(clean_hn_summary)
         elif hn_stories:
             lines = ["### HN Ссылки"]
             for index, (title, url, score, comments) in enumerate(hn_stories, start=1):
@@ -313,8 +396,13 @@ def format_heartbeat_for_daily(raw_heartbeat: str, date_label: str) -> str:
     try:
         reddit_posts = extract_reddit_posts(raw_heartbeat)
         reddit_summary = summarize_reddit_links_ru(reddit_posts)
-        if reddit_summary and _validate_summary(reddit_summary, len(reddit_posts)):
-            sections.append(reddit_summary)
+        clean_reddit_summary = (
+            _sanitize_link_section(reddit_summary, "Reddit Ссылки", len(reddit_posts))
+            if reddit_summary and _validate_summary(reddit_summary, len(reddit_posts))
+            else None
+        )
+        if clean_reddit_summary:
+            sections.append(clean_reddit_summary)
         elif reddit_posts:
             lines = ["### Reddit Ссылки"]
             for index, (title, url, score, comments, sub) in enumerate(reddit_posts, start=1):
@@ -328,8 +416,9 @@ def format_heartbeat_for_daily(raw_heartbeat: str, date_label: str) -> str:
     # X/Twitter (via Gemini grounded search)
     try:
         x_trends = fetch_x_ai_trends()
-        if x_trends:
-            sections.append(x_trends)
+        clean_x_trends = _sanitize_x_section(x_trends) if x_trends else None
+        if clean_x_trends:
+            sections.append(clean_x_trends)
     except Exception as e:
         print(f"  X/Twitter section error: {e}")
 
@@ -412,6 +501,150 @@ def run_tg_digest(dry_run: bool, hours: int) -> str | None:
         return None
 
 
+@beartype
+def _nlm_cmd(*args: str, timeout: int = 60) -> tuple[int, str]:
+    """Run notebooklm CLI command and return (returncode, stdout)."""
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    result = subprocess.run(
+        ["notebooklm", *args],
+        capture_output=True,
+        timeout=timeout,
+        env=env,
+    )
+    stdout = result.stdout.decode("utf-8", errors="replace").strip() if result.stdout else ""
+    return result.returncode, stdout
+
+
+@beartype
+def notebooklm_deep_research(
+    hn_links: list[tuple[str, str, int, int]],
+    reddit_links: list[tuple[str, str, int, int, str]],
+    tg_digest: str | None,
+    date_label: str,
+) -> str | None:
+    """Create NotebookLM notebook with all sources, get cross-referenced AI trends analysis."""
+    import json
+    import shutil
+    import tempfile
+
+    if not shutil.which("notebooklm"):
+        print("  NotebookLM CLI not found in PATH, skipping")
+        return None
+
+    # Check auth
+    rc, out = _nlm_cmd("auth", "check", "--json")
+    if rc != 0:
+        print("  NotebookLM: auth failed, skipping deep research")
+        return None
+
+    # Create notebook
+    title = f"AI Trends {date_label}"
+    rc, out = _nlm_cmd("create", title, "--json")
+    if rc != 0:
+        print(f"  NotebookLM: create failed: {out[:200]}")
+        return None
+
+    try:
+        notebook = json.loads(out)
+        notebook_id = notebook["notebook"]["id"]
+    except (json.JSONDecodeError, KeyError) as e:
+        print(f"  NotebookLM: parse error: {e}")
+        return None
+
+    _nlm_cmd("use", notebook_id)
+    source_ids: list[str] = []
+
+    # Add HN article URLs (top 7)
+    for story_title, url, score, comments in hn_links[:7]:
+        rc, out = _nlm_cmd("source", "add", url, "--json", timeout=30)
+        if rc == 0:
+            try:
+                src = json.loads(out)
+                source_ids.append(src["source"]["id"])
+                print(f"    + HN: {story_title[:50]}")
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+    # Add Reddit URLs (top 5)
+    for story_title, url, score, comments, sub in reddit_links[:5]:
+        rc, out = _nlm_cmd("source", "add", url, "--json", timeout=30)
+        if rc == 0:
+            try:
+                src = json.loads(out)
+                source_ids.append(src["source"]["id"])
+                print(f"    + Reddit: {story_title[:50]}")
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+    # Add TG digest as text source
+    tg_tmp: str | None = None
+    if tg_digest:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8",
+        ) as f:
+            f.write(f"# Telegram AI Communities Digest\n\n{tg_digest}")
+            tg_tmp = f.name
+        rc, out = _nlm_cmd("source", "add", tg_tmp, "--json", timeout=30)
+        if rc == 0:
+            try:
+                src = json.loads(out)
+                source_ids.append(src["source"]["id"])
+                print("    + TG digest")
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+    # Cleanup temp file
+    if tg_tmp and os.path.exists(tg_tmp):
+        os.unlink(tg_tmp)
+
+    if not source_ids:
+        print("  NotebookLM: no sources added successfully")
+        return None
+
+    # Wait for all sources to process
+    print(f"  Waiting for {len(source_ids)} sources to process...")
+    for sid in source_ids:
+        _nlm_cmd("source", "wait", sid, "--timeout", "120", timeout=130)
+
+    # Ask for deep cross-referenced analysis
+    print("  Asking NotebookLM for deep analysis...")
+    analysis_prompt = (
+        "Проанализируй ВСЕ загруженные источники вместе. "
+        "Найди пересечения и паттерны между ними.\n\n"
+        "Структура ответа (markdown, русский):\n\n"
+        "## Главные тренды\n"
+        "Что обсуждают сразу в нескольких источниках. "
+        "Конкретные проекты, компании, технологии.\n\n"
+        "## Восходящие темы\n"
+        "Что только начинает появляться, но уже есть сигналы из 2+ источников.\n\n"
+        "## Инструменты и проекты\n"
+        "Конкретные тулы, библиотеки, продукты которые набирают тягу. "
+        "Ссылки если есть.\n\n"
+        "## Из Telegram-сообщества\n"
+        "Ключевые обсуждения и инсайты из русскоязычных AI-чатов "
+        "(если есть в источниках).\n\n"
+        "## Что стоит проверить\n"
+        "2-3 темы которые стоит изучить глубже.\n\n"
+        "Правила:\n"
+        "- Только факты из источников, не выдумывай\n"
+        "- Конкретика > абстракции\n"
+        "- Если тема есть в нескольких источниках — отметь это\n"
+        "- Ссылки на оригинальные статьи где возможно"
+    )
+
+    rc, out = _nlm_cmd("ask", analysis_prompt, "--json", timeout=90)
+    if rc != 0:
+        print(f"  NotebookLM ask failed: {out[:200]}")
+        return None
+
+    try:
+        answer = json.loads(out)
+        result_text: str = answer.get("answer", "")
+        return result_text if result_text else None
+    except json.JSONDecodeError:
+        return out if out else None
+
+
 def main() -> None:
     import argparse
 
@@ -419,6 +652,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Don't send to Telegram")
     parser.add_argument("--skip-heartbeat", action="store_true", help="Skip heartbeat")
     parser.add_argument("--skip-tg", action="store_true", help="Skip TG monitor")
+    parser.add_argument("--no-nlm", action="store_true", help="Skip NotebookLM, use old Gemini")
     parser.add_argument("--hours", type=int, default=24, help="Time window for TG digest")
     args = parser.parse_args()
 
@@ -429,22 +663,55 @@ def main() -> None:
         sys.exit(1)
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    date_label = now[:10]
     print(f"Daily Digest — {now}")
 
-    parts: list[str] = []
+    # Phase 1: Collect raw data
+    raw_heartbeat: str | None = None
+    hn_links: list[tuple[str, str, int, int]] = []
+    reddit_links: list[tuple[str, str, int, int, str]] = []
 
-    # Heartbeat
     if not args.skip_heartbeat:
-        hb = run_heartbeat()
-        if hb:
-            parts.append(format_heartbeat_for_daily(hb, now[:10]))
+        raw_heartbeat = run_heartbeat()
+        if raw_heartbeat:
+            hn_links = extract_hn_links(raw_heartbeat, limit=10)
+            reddit_links = extract_reddit_posts(raw_heartbeat)
 
-    # TG Monitor
+    # Phase 2: TG Monitor
+    tg_digest_text: str | None = None
     if not args.skip_tg:
         run_tg_fetch()
-        digest = run_tg_digest(args.dry_run, args.hours)
-        if digest:
-            parts.append(digest)
+        tg_digest_text = run_tg_digest(args.dry_run, args.hours)
+
+    # Phase 3: Deep research via NotebookLM (or fallback to Gemini)
+    parts: list[str] = []
+    used_nlm = False
+
+    if not args.no_nlm and (hn_links or reddit_links or tg_digest_text):
+        print("\n[4/4] NotebookLM deep research...")
+        deep = notebooklm_deep_research(hn_links, reddit_links, tg_digest_text, date_label)
+        if deep:
+            parts.append(f"# AI Intelligence Briefing — {date_label}\n\n{deep}")
+            # Append source links
+            link_lines: list[str] = []
+            for title, url, *_ in hn_links[:10]:
+                link_lines.append(f"- [{title}]({url})")
+            for title, url, *rest in reddit_links[:5]:
+                sub = rest[2] if len(rest) > 2 else ""
+                prefix = f"r/{sub}: " if sub else ""
+                link_lines.append(f"- {prefix}[{title}]({url})")
+            if link_lines:
+                parts.append("## Источники\n" + "\n".join(link_lines))
+            used_nlm = True
+
+    # Fallback: old Gemini approach
+    if not used_nlm:
+        if not args.no_nlm:
+            print("  NotebookLM unavailable, falling back to Gemini summaries")
+        if raw_heartbeat:
+            parts.append(format_heartbeat_for_daily(raw_heartbeat, date_label))
+        if tg_digest_text:
+            parts.append(tg_digest_text)
 
     if not parts:
         print("\nNothing to report today.")
@@ -464,7 +731,7 @@ def main() -> None:
     md_path.write_text(full_digest, encoding="utf-8")
     print(f"\nSaved: {md_path}")
 
-    caption = f"Daily Digest — {date_str}"
+    caption = f"AI Intelligence Briefing — {date_str}" if used_nlm else f"Daily Digest — {date_str}"
     msg_id = send_file_to_telegram(md_path, caption, token, chat_id)
     print(f"Sent to Telegram: message_id={msg_id}")
 
