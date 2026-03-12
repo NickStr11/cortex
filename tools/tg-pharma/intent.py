@@ -24,6 +24,49 @@ class ParsedIntent(BaseModel):
 
 NAMED_PERIODS = {"last_month", "this_month", "last_90_days", "last_180_days", "all_time"}
 
+BATCH_START_HINTS = (
+    "начать пачку",
+    "начни пачку",
+    "открой пачку",
+    "включи пачку",
+    "включи режим пачки",
+    "режим пачки",
+    "собирай в пачку",
+)
+
+BATCH_STOP_HINTS = (
+    "закрыть пачку",
+    "закрой пачку",
+    "выключи пачку",
+    "останови пачку",
+    "заверши пачку",
+    "закончи пачку",
+    "выйди из пачки",
+)
+
+BATCH_SHOW_HINTS = (
+    "покажи пачку",
+    "что в пачке",
+    "покажи список пачки",
+    "покажи черновик пачки",
+    "покажи задачи в пачке",
+)
+
+BATCH_APPLY_HINTS = (
+    "применить пачку",
+    "примени пачку",
+    "подтверди пачку",
+    "применить все из пачки",
+    "применить всё из пачки",
+)
+
+BATCH_CLEAR_HINTS = (
+    "очистить пачку",
+    "очисти пачку",
+    "сбрось пачку",
+    "удали пачку",
+)
+
 INVENTORY_PREFIXES = (
     "поставь остаток",
     "установи остаток",
@@ -548,6 +591,24 @@ def heuristic_parse_chat(text: str) -> ParsedIntent | None:
 
 
 @beartype
+def heuristic_parse_batch_control(text: str) -> ParsedIntent | None:
+    cleaned = _clean_text(text)
+    lowered = cleaned.lower().strip(" ?!.")
+
+    if any(hint in lowered for hint in BATCH_APPLY_HINTS):
+        return ParsedIntent(action="apply_batch", confidence=0.99, note="heuristic")
+    if any(hint in lowered for hint in BATCH_CLEAR_HINTS):
+        return ParsedIntent(action="clear_batch", confidence=0.99, note="heuristic")
+    if any(hint in lowered for hint in BATCH_SHOW_HINTS):
+        return ParsedIntent(action="show_batch", confidence=0.99, note="heuristic")
+    if any(hint in lowered for hint in BATCH_STOP_HINTS):
+        return ParsedIntent(action="stop_batch", confidence=0.99, note="heuristic")
+    if any(hint in lowered for hint in BATCH_START_HINTS):
+        return ParsedIntent(action="start_batch", confidence=0.99, note="heuristic")
+    return None
+
+
+@beartype
 def looks_like_write_command(text: str) -> bool:
     lowered = _clean_text(text).lower()
     return any(
@@ -601,6 +662,7 @@ class IntentParser:
     @beartype
     def parse(self, text: str) -> ParsedIntent:
         for parser in (
+            heuristic_parse_batch_control,
             heuristic_parse_inventory_clear,
             heuristic_parse_inventory_command,
             heuristic_parse_inventory_delete,
@@ -621,6 +683,11 @@ class IntentParser:
 Parse this Russian pharmacy-assistant message into JSON.
 
 Allowed actions:
+- start_batch
+- stop_batch
+- show_batch
+- apply_batch
+- clear_batch
 - set_inventory
 - add_inventory
 - subtract_inventory
@@ -644,6 +711,11 @@ Return JSON only with:
 - note
 
 Rules:
+- start_batch: user wants to start accumulating multiple commands into one batch
+- stop_batch: user wants to leave batch mode without applying
+- show_batch: user wants to inspect current accumulated batch
+- apply_batch: user wants to preview/apply the current batch
+- clear_batch: user wants to discard the current batch
 - set_inventory: user clearly wants to set an exact stock number
 - add_inventory: user wants to add/increase stock by N
 - subtract_inventory: user wants to subtract/decrease stock by N
@@ -669,6 +741,9 @@ Message:
 {text}
 """.strip()
         payload = self._parse_json(prompt)
+        payload["action"] = payload.get("action") or "unknown"
+        payload["query"] = payload.get("query") or ""
+        payload["note"] = payload.get("note") or ""
         try:
             parsed = ParsedIntent.model_validate(payload)
         except ValidationError as exc:
@@ -735,6 +810,9 @@ Message:
 """.strip()
         payload = self._parse_json(prompt)
         payload.setdefault("qty", None)
+        payload["action"] = payload.get("action") or "unknown"
+        payload["query"] = payload.get("query") or ""
+        payload["note"] = payload.get("note") or ""
         try:
             parsed = ParsedIntent.model_validate(payload)
         except ValidationError as exc:

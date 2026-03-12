@@ -1,5 +1,50 @@
 # Development Context Log
 
+## 2026-03-12 - PharmOrder EAN override mechanism
+
+### Проблема
+Часть позиций в `sklit_cache.db` попадает под неверный `id_name` из-за ошибок в `pr_all.dbf` (поставщик сдаёт прайс с кривым EAN или СКЛИ Т матчит через свой справочник, а мы тянем raw поле).
+
+Конкретный кейс: EAN `4670033321227` (Азитромицин Вертекс 500мг) был записан под `id_name=449780` (Цетиризин). СКЛИ Т показывал его правильно (у него свой справочник), PharmOrder не видел.
+
+### Что сделано
+
+**Immediate fix (SQL)**:
+```sql
+UPDATE products SET id_name = 358502 WHERE ean = '4670033321227' AND supplier = 'ПУЛЬС Краснодар';
+-- 358502 = Азитромицин,т.п.п.о,0.5,№ 3
+-- Только ПУЛЬС — у остальных поставщиков этот EAN может быть другим продуктом
+```
+
+**Дурацкий фикс (постоянный)**:
+1. `/opt/pharmorder/src/data/ean_overrides.json` — файл с патчами:
+```json
+{
+  "by_ean_supplier": {
+    "4670033321227|ПУЛЬС Краснодар": 358502
+  }
+}
+```
+2. `db.py` → новая функция `apply_ean_overrides()` — читает JSON, применяет UPDATE + FTS rebuild
+3. `server.py` → `api_sync_upload_db()` вызывает `apply_ean_overrides()` после каждого синка
+
+**Принцип**: мамин/рабочий синк → файл на VPS → сервер сам патчит. Локальный sync_standalone.py трогать не нужно.
+
+### Ограничение
+`ean_overrides.json` — ручной патч-лист. Добавляется по мере обнаружения кривых EAN. Системного аудита (сравнение с СКЛИ Т) не делали — это отдельная задача.
+
+---
+
+## 2026-03-12 - tg-pharma batch draft + clean runtime
+- Added batch mode to `tools/tg-pharma` so multiple text/voice inventory tasks can be accumulated and then applied as one confirmed batch.
+- New intent actions in `intent.py`: `start_batch`, `stop_batch`, `show_batch`, `apply_batch`, `clear_batch`.
+- `ChatState` now persists `batch_active` and `batch_items`; `PendingAction` now supports `batch_entries`.
+- While batch mode is on, inventory writes (`set/add/subtract/delete/restore`) are added to the draft instead of creating one-off pending previews.
+- `apply_batch` now creates one pending snapshot, applies entries sequentially, keeps failed items in the draft, removes successful ones, and writes audit entries with `batch_mode: true`.
+- `/start` and `/help` now mention batch flow (`начать пачку -> покажи пачку -> применить пачку`).
+- Runtime issue fixed: there were multiple `tg-pharma` processes on the same new token, causing `409 Conflict`; all duplicates were killed and one clean process was started.
+- Current live marker in `bot.stdout.log`: `build=2026-03-12-batch-draft-1`; `bot.stderr.log` is empty.
+
 ## 2026-03-11 - tg-pharma bot_refs
 - `tools/tg-pharma` switched from heavy local `bot_analytics.db` to lightweight `bot_refs.db`.
 - New builder: `tools/tg-pharma/build_refs.py`

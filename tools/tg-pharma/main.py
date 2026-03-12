@@ -32,7 +32,7 @@ ROOT_ENV = ROOT_DIR / ".env"
 LOCAL_ENV = SCRIPT_DIR / ".env"
 AUDIT_LOG = SCRIPT_DIR / "audit.jsonl"
 CHAT_STATE_FILE = SCRIPT_DIR / "chat_state.json"
-BOT_BUILD = "2026-03-11-agent-readonly-1"
+BOT_BUILD = "2026-03-12-batch-draft-1"
 PENDING_TTL_SECONDS = int(os.environ.get("PHARMA_PENDING_TTL_SECONDS", "900"))
 PENDING_CLEANUP_INTERVAL_SECONDS = int(os.environ.get("PHARMA_PENDING_CLEANUP_INTERVAL_SECONDS", "60"))
 
@@ -105,7 +105,8 @@ class PendingAction:
     operation: str
     query: str
     qty: int
-    ranked: list[RankedCandidate]
+    ranked: list[RankedCandidate] = field(default_factory=list)
+    batch_entries: list[dict[str, Any]] = field(default_factory=list)
     selected_index: int = 0
     created_at: float = field(default_factory=time.time)
 
@@ -123,6 +124,8 @@ class ChatState:
     recent_turns: list[str] = field(default_factory=list)
     recent_candidates: list[dict[str, str]] = field(default_factory=list)
     last_deleted: dict[str, Any] | None = None
+    batch_active: bool = False
+    batch_items: list[dict[str, Any]] = field(default_factory=list)
 
 
 PENDING_LOCK = threading.Lock()
@@ -174,6 +177,27 @@ def load_chat_states() -> dict[int, ChatState]:
                 if isinstance(value.get("last_deleted"), dict)
                 else None
             ),
+            batch_active=bool(value.get("batch_active", False)),
+            batch_items=[
+                {
+                    "item_id": str(item.get("item_id", "")).strip(),
+                    "operation": str(item.get("operation", "")).strip(),
+                    "query": str(item.get("query", "")).strip(),
+                    "qty": int(item.get("qty", 0) or 0),
+                    "ean": str(item.get("ean", "")).strip(),
+                    "name": str(item.get("name", "")).strip(),
+                    "maker": str(item.get("maker", "")).strip(),
+                    "inventory_qty": (
+                        int(item.get("inventory_qty", 0))
+                        if item.get("inventory_qty") is not None
+                        else None
+                    ),
+                    "source_text": str(item.get("source_text", "")).strip(),
+                    "created_at": float(item.get("created_at", 0.0) or 0.0),
+                }
+                for item in value.get("batch_items", [])
+                if isinstance(item, dict) and str(item.get("ean", "")).strip() and str(item.get("operation", "")).strip()
+            ],
         )
     return loaded
 
@@ -188,6 +212,8 @@ def save_chat_states_locked() -> None:
             "recent_turns": state.recent_turns[-20:],
             "recent_candidates": state.recent_candidates[-8:],
             "last_deleted": state.last_deleted,
+            "batch_active": state.batch_active,
+            "batch_items": state.batch_items[-200:],
         }
         for chat_id, state in CHAT_STATE.items()
     }
@@ -471,6 +497,135 @@ def build_deleted_candidate(chat_id: int) -> RankedCandidate | None:
 
 
 @beartype
+def operation_title(operation: str, qty: int) -> str:
+    return {
+        "set_inventory": f"set {qty}",
+        "add_inventory": f"+{qty}",
+        "subtract_inventory": f"-{qty}",
+        "delete_inventory": "удалить",
+        "restore_inventory": f"восстановить {qty}",
+    }.get(operation, operation)
+
+
+@beartype
+def set_batch_active(chat_id: int, is_active: bool) -> None:
+    state = get_chat_state(chat_id)
+    with CHAT_STATE_LOCK:
+        state.batch_active = is_active
+        save_chat_states_locked()
+
+
+@beartype
+def clear_batch(chat_id: int, *, deactivate: bool = True) -> int:
+    state = get_chat_state(chat_id)
+    with CHAT_STATE_LOCK:
+        count = len(state.batch_items)
+        state.batch_items = []
+        if deactivate:
+            state.batch_active = False
+        save_chat_states_locked()
+    return count
+
+
+@beartype
+def get_batch_items(chat_id: int) -> list[dict[str, Any]]:
+    state = get_chat_state(chat_id)
+    return [dict(item) for item in state.batch_items]
+
+
+@beartype
+def add_batch_item(
+    chat_id: int,
+    *,
+    operation: str,
+    query: str,
+    qty: int,
+    item: RankedCandidate,
+    source_text: str,
+) -> dict[str, Any]:
+    state = get_chat_state(chat_id)
+    batch_item = {
+        "item_id": make_token(),
+        "operation": operation,
+        "query": query,
+        "qty": int(qty),
+        "ean": item.candidate.ean,
+        "name": item.candidate.name,
+        "maker": item.candidate.maker,
+        "inventory_qty": item.inventory_qty,
+        "source_text": source_text,
+        "created_at": time.time(),
+    }
+    with CHAT_STATE_LOCK:
+        state.batch_items.append(batch_item)
+        state.batch_items = state.batch_items[-200:]
+        save_chat_states_locked()
+    return batch_item
+
+
+@beartype
+def remove_batch_items(chat_id: int, item_ids: set[str]) -> int:
+    state = get_chat_state(chat_id)
+    with CHAT_STATE_LOCK:
+        before = len(state.batch_items)
+        state.batch_items = [item for item in state.batch_items if str(item.get("item_id", "")) not in item_ids]
+        if not state.batch_items:
+            state.batch_active = False
+        save_chat_states_locked()
+        return before - len(state.batch_items)
+
+
+@beartype
+def batch_control_buttons(has_items: bool) -> list[list[dict[str, str]]]:
+    rows: list[list[dict[str, str]]] = [[{"text": "Показать пачку", "callback_data": "batch_show"}]]
+    if has_items:
+        rows[0].append({"text": "Применить пачку", "callback_data": "batch_prepare"})
+        rows.append([{"text": "Очистить пачку", "callback_data": "batch_clear"}])
+    return rows
+
+
+@beartype
+def batch_entry_line(entry: dict[str, Any], index: int) -> str:
+    maker = f" | {entry.get('maker', '')}" if entry.get("maker") else ""
+    return (
+        f"{index}. {operation_title(str(entry.get('operation', '')), int(entry.get('qty', 0) or 0))} "
+        f"— {entry.get('name', '')}{maker}"
+    )
+
+
+@beartype
+def batch_summary_text(chat_id: int, *, detailed: bool = True) -> str:
+    state = get_chat_state(chat_id)
+    status = "активна" if state.batch_active else "на паузе"
+    entries = state.batch_items
+    if not entries:
+        return f"Пачка {status}, но пока пустая."
+    lines = [f"Пачка {status}. Задач: {len(entries)}."]
+    total_add = sum(int(item.get("qty", 0) or 0) for item in entries if item.get("operation") == "add_inventory")
+    total_sub = sum(int(item.get("qty", 0) or 0) for item in entries if item.get("operation") == "subtract_inventory")
+    total_set = sum(1 for item in entries if item.get("operation") == "set_inventory")
+    total_delete = sum(1 for item in entries if item.get("operation") == "delete_inventory")
+    parts: list[str] = []
+    if total_set:
+        parts.append(f"set: {total_set}")
+    if total_add:
+        parts.append(f"add: +{total_add}")
+    if total_sub:
+        parts.append(f"sub: -{total_sub}")
+    if total_delete:
+        parts.append(f"delete: {total_delete}")
+    if parts:
+        lines.append("Сводка: " + ", ".join(parts))
+    if detailed:
+        lines.append("")
+        for idx, entry in enumerate(entries[:20], start=1):
+            lines.append(batch_entry_line(entry, idx))
+        if len(entries) > 20:
+            lines.append(f"... и ещё {len(entries) - 20}")
+    return "\n".join(lines)
+
+
+@beartype
 def short_period_label(period: str) -> str:
     return {
         "last_month": "в прошлом месяце",
@@ -735,6 +890,19 @@ def inventory_status_reply(item: RankedCandidate) -> str:
 
 @beartype
 def preview_text(action: PendingAction) -> str:
+    if action.operation == "batch_apply":
+        entries = action.batch_entries
+        if not entries:
+            return "Пачка пустая."
+        lines = [f"Сейчас применю пачку. Задач: {len(entries)}.", ""]
+        for idx, entry in enumerate(entries[:20], start=1):
+            lines.append(batch_entry_line(entry, idx))
+        if len(entries) > 20:
+            lines.append(f"... и ещё {len(entries) - 20}")
+        lines.append("")
+        lines.append("Подтвердить всю пачку?")
+        return "\n".join(lines)
+
     item = action.selected
     op_title = {
         "set_inventory": f"Поставлю остаток: {action.qty}",
@@ -766,6 +934,14 @@ def preview_buttons(token: str, allow_switch: bool) -> list[list[dict[str, str]]
         rows[0].append({"text": "Другой товар", "callback_data": f"choose:{token}"})
     rows.append([{"text": "Отмена", "callback_data": f"cancel:{token}"}])
     return rows
+
+
+@beartype
+def batch_preview_buttons(token: str) -> list[list[dict[str, str]]]:
+    return [
+        [{"text": "Подтвердить всю пачку", "callback_data": f"apply:{token}"}],
+        [{"text": "Отмена", "callback_data": f"cancel:{token}"}],
+    ]
 
 
 @beartype
@@ -1085,6 +1261,115 @@ def resolution_fallback_reply(query: str, ranked: list[RankedCandidate]) -> str:
 
 
 @beartype
+def batch_add_reply(batch_item: dict[str, Any], total_count: int, *, active: bool) -> str:
+    maker = f" | {batch_item.get('maker', '')}" if batch_item.get("maker") else ""
+    status = "активна" if active else "на паузе"
+    return (
+        f"Добавил в пачку.\n"
+        f"{operation_title(str(batch_item.get('operation', '')), int(batch_item.get('qty', 0) or 0))} — "
+        f"{batch_item.get('name', '')}{maker}\n"
+        f"Сейчас в inventory: {batch_item.get('inventory_qty', 0) if batch_item.get('inventory_qty') is not None else 0}\n"
+        f"Пачка {status}. Задач: {total_count}."
+    )
+
+
+@beartype
+def make_batch_pending(chat_id: int, source_text: str) -> PendingAction | None:
+    entries = get_batch_items(chat_id)
+    if not entries:
+        return None
+    return PendingAction(
+        token=make_token(),
+        chat_id=chat_id,
+        source_text=source_text,
+        operation="batch_apply",
+        query="",
+        qty=0,
+        ranked=[],
+        batch_entries=entries,
+    )
+
+
+@beartype
+def apply_batch_snapshot(chat_id: int, source_text: str, entries: list[dict[str, Any]]) -> tuple[str, int, int]:
+    success_ids: set[str] = set()
+    lines = ["Пачку применил."]
+    success_count = 0
+    error_count = 0
+
+    for idx, entry in enumerate(entries, start=1):
+        ean = str(entry.get("ean", "")).strip()
+        name = str(entry.get("name", "")).strip()
+        maker = str(entry.get("maker", "")).strip()
+        operation = str(entry.get("operation", "")).strip()
+        qty = int(entry.get("qty", 0) or 0)
+        if not ean or not operation:
+            error_count += 1
+            lines.append(f"{idx}. пропустил битую задачу")
+            continue
+
+        before = API.get_inventory(ean)
+        old_qty = before.qty if before else 0
+        try:
+            if operation == "add_inventory":
+                updated = API.add_inventory(ean=ean, name=name, maker=maker, qty=qty)
+                new_qty = updated.qty
+            elif operation == "subtract_inventory":
+                updated = API.subtract_inventory(ean=ean, name=name, maker=maker, qty=qty)
+                new_qty = updated.qty
+            elif operation == "delete_inventory":
+                deleted = API.delete_inventory(ean)
+                if not deleted:
+                    raise PharmOrderError("not found")
+                new_qty = None
+            elif operation == "restore_inventory":
+                updated = API.set_inventory(ean=ean, name=name, maker=maker, qty=qty)
+                new_qty = updated.qty
+            else:
+                updated = API.set_inventory(ean=ean, name=name, maker=maker, qty=qty)
+                new_qty = updated.qty
+        except Exception as exc:
+            error_count += 1
+            lines.append(f"{idx}. ошибка — {name}: {exc}")
+            continue
+
+        if operation == "delete_inventory":
+            remember_last_deleted(
+                chat_id,
+                RankedCandidate(
+                    candidate=ProductCandidate(ean=ean, name=name, maker=maker, id_name=None),
+                    score=0.0,
+                    inventory_qty=old_qty,
+                ),
+            )
+
+        audit({
+            "event": operation,
+            "chat_id": chat_id,
+            "query": str(entry.get("query", "")).strip(),
+            "source_text": source_text or str(entry.get("source_text", "")).strip(),
+            "ean": ean,
+            "name": name,
+            "old_qty": old_qty,
+            "new_qty": new_qty,
+            "batch_item_id": str(entry.get("item_id", "")).strip(),
+            "batch_mode": True,
+        })
+        success_ids.add(str(entry.get("item_id", "")).strip())
+        success_count += 1
+        result_label = "удалил" if operation == "delete_inventory" else f"стало {new_qty}"
+        lines.append(f"{idx}. {operation_title(operation, qty)} — {name} ({result_label})")
+
+    if success_ids:
+        removed = remove_batch_items(chat_id, success_ids)
+        if removed:
+            state = get_chat_state(chat_id)
+            if not state.batch_items:
+                set_batch_active(chat_id, False)
+    return "\n".join(lines), success_count, error_count
+
+
+@beartype
 def download_voice(client: httpx.Client, file_id: str) -> Path:
     response = client.get(api_url("getFile"), params={"file_id": file_id}, timeout=30)
     response.raise_for_status()
@@ -1301,6 +1586,49 @@ def handle_intent(client: httpx.Client, chat_id: int, source_text: str, intent: 
         flush=True,
     )
 
+    if intent.action == "start_batch":
+        set_batch_active(chat_id, True)
+        send_message(
+            client,
+            chat_id,
+            "Пачка включена. Шли голосовые или текст подряд: я буду складывать изменения в черновик, а не применять сразу.",
+            batch_control_buttons(bool(get_batch_items(chat_id))),
+        )
+        return
+
+    if intent.action == "stop_batch":
+        set_batch_active(chat_id, False)
+        send_message(
+            client,
+            chat_id,
+            batch_summary_text(chat_id, detailed=False),
+            batch_control_buttons(bool(get_batch_items(chat_id))),
+        )
+        return
+
+    if intent.action == "show_batch":
+        send_message(
+            client,
+            chat_id,
+            batch_summary_text(chat_id, detailed=True),
+            batch_control_buttons(bool(get_batch_items(chat_id))),
+        )
+        return
+
+    if intent.action == "clear_batch":
+        removed = clear_batch(chat_id, deactivate=True)
+        send_message(client, chat_id, f"Пачку очистил. Удалил задач: {removed}.")
+        return
+
+    if intent.action == "apply_batch":
+        pending = make_batch_pending(chat_id, source_text)
+        if not pending:
+            send_message(client, chat_id, "Пачка пока пустая.")
+            return
+        put_pending(pending)
+        send_message(client, chat_id, preview_text(pending), batch_preview_buttons(pending.token))
+        return
+
     if handle_readonly_action(client, chat_id, source_text, intent, state):
         return
 
@@ -1309,6 +1637,22 @@ def handle_intent(client: httpx.Client, chat_id: int, source_text: str, intent: 
         deleted_item = build_deleted_candidate(chat_id)
         if not snapshot or not deleted_item:
             send_message(client, chat_id, "Нечего возвращать: в этом чате нет последней удалённой позиции.")
+            return
+        if state.batch_active:
+            batch_item = add_batch_item(
+                chat_id,
+                operation="restore_inventory",
+                query=deleted_item.candidate.name,
+                qty=int(snapshot.get("qty", 0) or 0),
+                item=deleted_item,
+                source_text=source_text,
+            )
+            send_message(
+                client,
+                chat_id,
+                batch_add_reply(batch_item, len(get_batch_items(chat_id)), active=get_chat_state(chat_id).batch_active),
+                batch_control_buttons(True),
+            )
             return
         token = make_token()
         pending = PendingAction(
@@ -1347,6 +1691,22 @@ def handle_intent(client: httpx.Client, chat_id: int, source_text: str, intent: 
             return
         update_chat_focus(chat_id, ranked[0].candidate.name, intent.period or "last_month")
         remember_candidates(chat_id, ranked)
+        if state.batch_active:
+            batch_item = add_batch_item(
+                chat_id,
+                operation=intent.action,
+                query=intent.query,
+                qty=int(intent.qty or 0),
+                item=ranked[0],
+                source_text=source_text,
+            )
+            send_message(
+                client,
+                chat_id,
+                batch_add_reply(batch_item, len(get_batch_items(chat_id)), active=get_chat_state(chat_id).batch_active),
+                batch_control_buttons(True),
+            )
+            return
         print(
             f"[inventory-preview] chat={chat_id} resolved={ranked[0].candidate.name!r} "
             f"maker={ranked[0].candidate.maker!r} ranked={len(ranked)}",
@@ -1396,7 +1756,14 @@ def handle_message(client: httpx.Client, message: dict[str, Any]) -> None:
 
     if text := str(message.get("text") or "").strip():
         if text in {"/start", "/help"}:
-            send_message(client, chat_id, "Умею говорить по товарам, истории закупок и готовить изменение остатка через confirm. Примеры: `поставь остаток азитромицина 5`, `добавь 5 штук промедовского в остатки`, `какой у нас азитромицин?`")
+            send_message(
+                client,
+                chat_id,
+                "Помогаю по товарам, истории закупок и остаткам. "
+                "Могу менять остатки через confirm и собирать пачку задач. "
+                "Примеры: поставь остаток азитромицина 5; добавь 5 штук промедовского в остатки; "
+                "какой у нас азитромицин; начать пачку -> покажи пачку -> применить пачку.",
+            )
             return
         handle_intent(client, chat_id, text, PARSER.parse(text))
         return
@@ -1423,6 +1790,33 @@ def handle_callback(client: httpx.Client, callback: dict[str, Any]) -> None:
     message_id = int(message.get("message_id", 0) or 0)
     data = str(callback.get("data") or "")
 
+    if data == "batch_show":
+        edit_message(
+            client,
+            chat_id,
+            message_id,
+            batch_summary_text(chat_id, detailed=True),
+            batch_control_buttons(bool(get_batch_items(chat_id))),
+        )
+        answer_callback(client, callback_id)
+        return
+
+    if data == "batch_clear":
+        removed = clear_batch(chat_id, deactivate=True)
+        edit_message(client, chat_id, message_id, f"Пачку очистил. Удалил задач: {removed}.")
+        answer_callback(client, callback_id, "Пачку очистил.")
+        return
+
+    if data == "batch_prepare":
+        pending = make_batch_pending(chat_id, "callback:batch_prepare")
+        if not pending:
+            answer_callback(client, callback_id, "Пачка пустая.")
+            return
+        put_pending(pending)
+        edit_message(client, chat_id, message_id, preview_text(pending), batch_preview_buttons(pending.token))
+        answer_callback(client, callback_id)
+        return
+
     if data.startswith("cancel:"):
         token = data.split(":", 1)[1]
         delete_pending(token)
@@ -1433,6 +1827,9 @@ def handle_callback(client: httpx.Client, callback: dict[str, Any]) -> None:
     if data.startswith("choose:"):
         token = data.split(":", 1)[1]
         action = get_pending(token)
+        if action and not action.ranked:
+            answer_callback(client, callback_id, "Это подтверждение уже протухло.")
+            return
         if not action:
             answer_callback(client, callback_id, "Это подтверждение уже протухло.")
             return
@@ -1446,6 +1843,9 @@ def handle_callback(client: httpx.Client, callback: dict[str, Any]) -> None:
     if data.startswith("pick:"):
         _, token, raw_idx = data.split(":", 2)
         action = get_pending(token)
+        if action and not action.ranked:
+            answer_callback(client, callback_id, "Этот выбор уже протух.")
+            return
         if not action:
             answer_callback(client, callback_id, "Этот выбор уже протух.")
             return
@@ -1459,6 +1859,15 @@ def handle_callback(client: httpx.Client, callback: dict[str, Any]) -> None:
         action = pop_pending(token)
         if not action:
             answer_callback(client, callback_id, "Это подтверждение уже использовано.")
+            return
+        if action.operation == "batch_apply":
+            reply, success_count, error_count = apply_batch_snapshot(chat_id, action.source_text, action.batch_entries)
+            tail = ""
+            remaining = len(get_batch_items(chat_id))
+            if remaining:
+                tail = f"\n\nВ пачке осталось: {remaining}."
+            edit_message(client, chat_id, message_id, reply + tail)
+            answer_callback(client, callback_id, f"Пачка: ok={success_count}, err={error_count}")
             return
         item = action.selected
         if action.operation == "add_inventory":

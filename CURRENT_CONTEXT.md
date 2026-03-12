@@ -1,5 +1,12 @@
 # Current Context
 
+## 2026-03-12 tg-pharma batch draft
+- `tools/tg-pharma` now has batch mode for stacked text/voice inventory tasks.
+- New chat controls: `start_batch`, `show_batch`, `apply_batch`, `clear_batch`, `stop_batch`.
+- While batch is active, inventory writes (`set/add/subtract/delete/restore`) are accumulated into `ChatState.batch_items` instead of going straight into single-item pending confirm.
+- `apply_batch` creates one pending snapshot and then applies entries sequentially with per-item audit log and partial-failure retention.
+- Live runtime is clean on the separate bot token (`@pharmorder_ops_bot`): one `python -u main.py`, build marker `2026-03-12-batch-draft-1`, no `409 Conflict`, stderr empty.
+
 ## 2026-03-11 tg-pharma bot_refs
 - `tools/tg-pharma` switched from heavy local `bot_analytics.db` to lightweight `bot_refs.db` + live VPS `sklit_cache.db`/`order_history.db`.
 - New builder: `tools/tg-pharma/build_refs.py`
