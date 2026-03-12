@@ -1,15 +1,92 @@
 # Development Context Log
 
+## 2026-03-11 - tg-pharma bot_refs
+- `tools/tg-pharma` switched from heavy local `bot_analytics.db` to lightweight `bot_refs.db`.
+- New builder: `tools/tg-pharma/build_refs.py`
+- New DB: `tools/tg-pharma/data/bot_refs.db`
+- Current refs build: 91,335 names, 90,693 makers, 22,019 alias rows, 29.9 MB, `HISTEAN` excluded by default.
+- Runtime now uses `BotRefsClient` for identity/alias resolution and keeps `bot_analytics.db` only as legacy fallback.
+
 ## Последнее обновление
-- Дата: 2026-03-09
+- Дата: 2026-03-11
+- `tools/tg-pharma`: local analytics SQLite built from `C:\Users\User\Desktop\SKLIT` and wired into runtime.
+- New derived DB: `D:\code\2026\2\cortex\tools\tg-pharma\data\bot_analytics.db`
+- Counts: 92,323 catalog products, 141,496 alias EAN rows, 85,733 purchase lines.
+- Bot now prefers local analytics for `resolve_product` and `purchase_stats`, then falls back to VPS SSH history.
 
 ## Текущий статус
-- Этап: Repo hygiene + TG digest v2 + funding-scanner cleanup.
-- Последнее действие: сессия 28 — Codex architectural review → repo invariants в CLAUDE.md, daily digest v2 (Reddit + X/Twitter) задеплоен на VM, funding-scanner удалён из cortex (развивается отдельно в D:\code\2026\3\funding-scanner).
-- Текущий фокус: **Kwork** (обложки + публикация, пилится с Codex) + **Funding Scanner** (отдельный репо). Детали: `CURRENT_CONTEXT.md`
-- Следующий шаг: Kwork обложки + публикация кворков (с Codex). Funding scanner: починить латентный баг (db.py schema missing price/next_funding_ts columns).
+- Этап: TG digest raw chat + PharmOrder UI + Sozvezdie matrix investigation.
+- Последнее действие: сессия 30 — `tools/tg-pharma/` MVP для Telegram inventory control (voice/text → parse → search → preview → confirm → apply), плюс smoke на живом PharmOrder API без write.
+- Текущий фокус: **PharmOrder** (Sozvezdie supplier matrix + tg-pharma MVP) + **TG Digest** (NotebookLM raw chat). Детали: `CURRENT_CONTEXT.md`
+- Следующий шаг: PharmOrder — добить live Telegram smoke для `tg-pharma`, затем вернуться к Sozvezdie supplier matrix и заполнению `matrix_suppliers`.
 
 ## История изменений
+
+### 2026-03-11 — tg-pharma MVP for PharmOrder inventory (сессия 30)
+- Что сделано:
+  - Создан новый инструмент `tools/tg-pharma/` как отдельный Telegram-клиент для PharmOrder, не в `tg-bridge` и не в коде сайта.
+  - Scope специально узкий: только `set_inventory`, поток `text/voice -> parse -> search -> preview -> inline confirm -> apply -> audit log`.
+  - Используется существующий bot token через env fallback (`PHARMA_TELEGRAM_BOT_TOKEN` или root `TELEGRAM_BOT_TOKEN`) и whitelist `PHARMA_ALLOWED_CHAT_IDS`.
+  - `pharm_api.py`: read-only/search layer к PharmOrder API (`/api/search`, `/api/lookup`, `/api/inventory/{ean}`, `/api/inventory/set`).
+  - `intent.py`: Gemini Flash parser + deterministic fast-path для команд вида `поставь остаток ... 5`, чтобы не спотыкаться о простые кейсы и падежи.
+  - `main.py`: long polling, voice download from Telegram, Gemini transcription, inline candidate picking, confirm/apply callbacks, `audit.jsonl`.
+  - Поиск переживает падежи через query variants (`азитромицина` -> fallback search variants, результаты на живом API есть).
+  - README и `.env.example` добавлены, `audit.jsonl` занесён в `.gitignore`.
+- Проверки:
+  - `uv sync` прошёл
+  - `uv run python -m py_compile main.py intent.py pharm_api.py` прошёл
+  - smoke: `parse("поставь остаток азитромицина 5 штук")` + live `/api/search` + live `/api/inventory/{ean}` прошли без write
+- Дальнейшие улучшения в этой же сессии:
+  - token для pending заменён с `uuid[:8]` на полный `uuid.hex`
+  - добавлен lock на `PENDING` и `apply` теперь забирает pending атомарно через `pop_pending()`
+  - bot candidate resolution усилен: похожие товары ранжируются по текущим остаткам, сегодняшней истории (`/api/product?id_name`) и истории сайта (`/api/history/search`)
+  - если есть сильный лидер, бот сразу подставляет его как "похоже, это ваш обычный товар" и всё равно требует confirm
+  - добавлен read-only intent `resolve_product` для вопросов вида `какой у нас азитромицин?`, чтобы бот сначала умел назвать наиболее вероятный товар без записи в inventory
+- Ограничения:
+  - live Telegram flow ещё не прогнан руками
+  - если использовать тот же bot token, что у `tools/tg-bridge`, нельзя держать оба long-poller одновременно
+  - root `.env` содержит `TELEGRAM_BOT_TOKEN` и `GOOGLE_API_KEY`, но `PHARMORDER_API_KEY` надо задавать отдельно
+
+### 2026-03-11 — tg-pharma upgraded to conversational Flash 3 bot
+- Что поменялось:
+  - `main.py` пересобран с нуля после кривой промежуточной замены; убраны дубли функций и восстановлен единый polling loop.
+  - `intent.py` переписан начисто: рабочие русские heuristics для `set_inventory`, `resolve_product`, `purchase_stats`, `chat`; Gemini остался для chat/fallback/voice.
+  - Добавлен SSH catalog search по `sklit_cache.db`, потому что live `/api/search` на VPS давал пустые результаты по названиям вроде `азитромицин`.
+  - Починен purchase history query: раньше `lower(tovar)` ломал кириллицу в SQLite, теперь история ищется через `LIKE` с query variants.
+  - На живых данных проверено:
+    - `азитромицин` → ranking лидирует `Азитромицин,капс,0.5,№ 3` (`EAN 4607022750508`), лидер по прошлому месяцу `136 шт / 12 закупок / Катрен Краснодар`
+    - `нитроглицерин` → ranking и purchase stats тоже возвращают осмысленные ответы
+- Что дальше:
+  - перезапустить `tg-pharma`
+  - прогнать в Telegram руками `какой у нас азитромицин?`
+  - прогнать `какой азитромицин мы чаще покупали в прошлом месяце и у какого поставщика?`
+  - прогнать `поставь остаток азитромицина 5 штук` до preview/confirm/apply
+
+### 2026-03-11 — Raw TG chat for NotebookLM + PharmOrder UI + Sozvezdie matrix (сессия 29)
+- Что сделано:
+  - **TG Digest — NotebookLM deep research**:
+    - Заменён Gemini 1-liner fallback на NotebookLM deep research (3-5 мин анализа)
+    - `_collect_raw_chat()` — собирает enriched+filtered TG сообщения как читаемый чат-лог с реальными именами, таймстемпами, контекстом реплаев
+    - NotebookLM получает RAW чат вместо processed MapReduce дайджеста — output "живее", цитаты реальных людей
+    - Retry + validation + error isolation для каждой секции (HN, Reddit, X/Twitter)
+    - Промпт: запрет мета-комментариев Gemini ("статья из будущего?"), HN limit 5→10
+    - Тест: 7591 символов с реальными цитатами из vibecod3rs (proxyz, M.K., Artyom, Andrey Unger)
+  - **PharmOrder UI optimizations** (локально + VPS через Codex):
+    - Partial render: selectScanItem() использует _highlightScanItem() вместо полного renderScanList()
+    - Smart polling: visibility API pause + backoff после 5 пустых ответов
+    - `data-idx` атрибуты для DOM-матчинга вместо fragile onclick строк
+    - pollUnknowns: dedup EANs через Set, partial update ≤5 items
+    - Codex review выявил: showProduct skip слишком агрессивный, timer race, dead vars → исправлено
+    - **Codex задеплоил свою версию патчей на VPS** — локальный index.html разошёлся с VPS, НЕ синкать вслепую
+  - **Sozvezdie matrix investigation**:
+    - Пользователь хочет видеть на каждой строке поставщика, входит ли конкретный товар+поставщик в матрицу Созвездия
+    - Root cause: `matrix_suppliers` таблица пустая (0 rows), хотя `matrix_products` имеет 36K строк
+    - API `/api/sozvezdie?ean=...` работает, frontend badges рендерятся, но suppliers data нет
+    - Причина: sync_standalone.py не заполняет matrix_suppliers из product_post.dbf/workt_5160.dbf
+    - Отложено: пользователь завтра предоставит скриншот СКЛИТ с матрицей на поставщиках
+- Файлы: tools/tg-monitor/daily.py (raw chat + NotebookLM + retry + validation), D:\code\2026\3\pharmOrder\PharmOrder\static\index.html (UI optimizations, LOCAL ONLY — VPS has Codex version)
+- Коммиты: 226c934 (digest quality), 72cff99 (NotebookLM deep research), e74539f (raw TG chat for NotebookLM)
+- ВАЖНО: Локальный PharmOrder index.html ≠ VPS версия. Codex задеплоил свои патчи напрямую на VPS.
 
 ### 2026-03-09 — Repo invariants + TG digest v2 + funding-scanner cleanup (сессия 28)
 - Что сделано:
