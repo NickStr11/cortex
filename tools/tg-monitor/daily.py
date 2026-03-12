@@ -463,11 +463,20 @@ def run_tg_digest(dry_run: bool, hours: int) -> str | None:
             pipeline_reduce,
             pipeline_verify,
             has_verification_issues,
+            build_weekly_materials_section,
+            inject_weekly_materials_section,
+            utc_now,
             CHUNK_SIZE,
+            WEEKLY_MATERIALS_HOURS,
         )
         import math
 
-        groups_messages = load_recent_messages(hours)
+        current_window_end = utc_now()
+        groups_messages = load_recent_messages(hours, window_end=current_window_end)
+        weekly_groups_messages = load_recent_messages(
+            WEEKLY_MATERIALS_HOURS,
+            window_end=current_window_end,
+        )
         if not groups_messages:
             print("  No recent TG messages")
             return None
@@ -487,11 +496,24 @@ def run_tg_digest(dry_run: bool, hours: int) -> str | None:
             chunks = [top[i * CHUNK_SIZE:(i + 1) * CHUNK_SIZE] for i in range(n_chunks)]
             topics = pipeline_map(chunks)
             # REDUCE
-            digest = pipeline_reduce(group_name, topics)
+            digest = pipeline_reduce(
+                group_name,
+                topics,
+                top,
+                hours,
+                window_end=current_window_end,
+            )
             # VERIFY
             verify_result = pipeline_verify(digest, top)
             if has_verification_issues(verify_result):
                 print(f"    WARNING: verification flagged issues in {group_name}")
+
+            weekly_messages = weekly_groups_messages.get(group_name, [])
+            if weekly_messages:
+                weekly_enriched = enrich_messages(weekly_messages)
+                weekly_section = build_weekly_materials_section(weekly_enriched)
+                digest = inject_weekly_materials_section(digest, weekly_section)
+
             parts.append(digest)
             print(f"    digest: {len(digest)} chars")
 

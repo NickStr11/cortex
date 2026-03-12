@@ -21,6 +21,8 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 if sys.stdout.encoding != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -40,6 +42,11 @@ from config import (
 
 # Fast model for MAP/VERIFY (cheap), Pro for REDUCE (quality)
 GEMINI_MODEL_FAST = "gemini-2.0-flash"
+try:
+    MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+except ZoneInfoNotFoundError:
+    MOSCOW_TZ = timezone(timedelta(hours=3))
+WEEKLY_MATERIALS_HOURS = 24 * 7
 
 CHUNK_SIZE = 15  # messages per MAP chunk
 URL_RE = re.compile(r"https?://\S+")
@@ -71,15 +78,19 @@ MAP_PROMPT = """Собери один сигнал из кластера соо�
 REDUCE_PROMPT = """Собери полезный дайджест Telegram-группы из извлечённых сигналов.
 
 Структура:
-1. *Главные сигналы* — 3-5 самых полезных тем, с привязкой к участникам
-2. *Кейсы и практики* — кто что реально сделал, протестировал или выкатил
-3. *Инструменты и модели* — что хвалят, что ругают, где ограничения
-4. *Ссылки* — каждый URL с однострочным пояснением
-5. *Что стоит проверить* — 2-4 практических вывода или идеи для теста
+1. *Что появилось с прошлого выпуска* — 2-4 буллета именно про текущее окно наблюдения
+2. *Главные сигналы* — 3-5 самых полезных тем, с привязкой к участникам
+3. *Кейсы и практики* — кто что реально сделал, протестировал или выкатил
+4. *Инструменты и модели* — что хвалят, что ругают, где ограничения
+5. *Ссылки* — каждый URL с однострочным пояснением
+6. *Что стоит проверить* — 2-4 практических вывода или идеи для теста
 
 Правила:
 - 350-900 слов
 - Конкретика: имена, инструменты, числа
+- Дайджест должен ощущаться как выпуск за конкретное окно наблюдения, а не вечный общий обзор
+- В секции "Что появилось с прошлого выпуска" пиши только про то, что всплыло, изменилось или усилилось в текущем окне
+- Если тема не новая, но продолжилась, так и напиши: "снова всплыло", "продолжилось", "дожали"
 - Каждое сильное утверждение привязывай к участнику или группе участников
 - Если это просто мнение, формулируй как мнение, а не как факт
 - Если данные слабые или спорные — прямо это укажи
@@ -114,6 +125,20 @@ VERIFY_PROMPT = """Проверь дайджест на фактическую �
 
 В конце: итого X confirmed, Y unverified, Z hallucinations.
 Если есть HALLUCINATION или OVERSTATED — предложи более точную формулировку.
+"""
+
+WEEKLY_MATERIALS_PROMPT = """Собери раздел *Топ материалы за неделю* по материалам, которые тащили в чат.
+
+Правила:
+- Возьми только реально переданные URL из входных данных
+- Выбери 3-5 самых стоящих материалов
+- Пиши по-русски, коротко и по делу
+- Не выдумывай содержимое статьи; опирайся только на URL, сниппеты и контекст сообщений
+- Если точного названия материала не видно, можно использовать домен или короткое описание по сниппету
+
+Формат:
+*Топ материалы за неделю*
+- [название](url) — почему это вообще тащили в чат / что там полезного
 """
 
 
@@ -156,6 +181,269 @@ def compute_signal_metadata(
         score += 0.2
 
     return round(score, 2), matched_keywords[:4], has_url, has_numbers
+
+
+@beartype
+def utc_now() -> datetime:
+    """Return current UTC time."""
+    return datetime.now(timezone.utc)
+
+
+@beartype
+def parse_message_date(date_str: str) -> datetime | None:
+    """Parse ISO message datetime with UTC fallback."""
+    if not date_str:
+        return None
+    try:
+        message_date = datetime.fromisoformat(date_str)
+    except ValueError:
+        return None
+    if message_date.tzinfo is None:
+        message_date = message_date.replace(tzinfo=timezone.utc)
+    return message_date
+
+
+@beartype
+def format_window_label(window_end: datetime, hours: int) -> str:
+    """Format the digest window in Moscow time."""
+    window_start = window_end - timedelta(hours=hours)
+    start_msk = window_start.astimezone(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M")
+    end_msk = window_end.astimezone(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M")
+    return f"{start_msk} -> {end_msk} МСК"
+
+
+@beartype
+def build_freshness_context(messages: list[dict[str, object]], window_end: datetime, hours: int) -> str:
+    """Build compact metadata so the digest feels tied to a concrete time window."""
+    parsed_dates = [
+        parsed
+        for msg in messages
+        if (parsed := parse_message_date(str(msg.get("date", "")))) is not None
+    ]
+    if not parsed_dates:
+        return "Нет валидных временных меток."
+
+    first_message = min(parsed_dates).astimezone(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M МСК")
+    last_message = max(parsed_dates).astimezone(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M МСК")
+    recent_6h_cutoff = window_end - timedelta(hours=min(6, hours))
+    recent_3h_cutoff = window_end - timedelta(hours=min(3, hours))
+    messages_6h = sum(1 for dt in parsed_dates if dt >= recent_6h_cutoff)
+    messages_3h = sum(1 for dt in parsed_dates if dt >= recent_3h_cutoff)
+
+    return "\n".join([
+        f"- Окно наблюдения: {format_window_label(window_end, hours)}",
+        f"- Сообщений в окне: {len(messages)}",
+        f"- Сообщений за последние 6 часов окна: {messages_6h}",
+        f"- Сообщений за последние 3 часа окна: {messages_3h}",
+        f"- Первое сообщение окна: {first_message}",
+        f"- Последнее сообщение окна: {last_message}",
+    ])
+
+
+@beartype
+def inject_window_label(digest: str, window_label: str) -> str:
+    """Insert the explicit Moscow-time observation window into the digest."""
+    if "Окно наблюдения" in digest:
+        return digest
+
+    lines = digest.splitlines()
+    window_line = f"*Окно наблюдения:* {window_label}"
+    if lines and lines[0].startswith("*Дайджест "):
+        return "\n".join([lines[0], "", window_line, *lines[1:]])
+    return f"{window_line}\n\n{digest}"
+
+
+@beartype
+def normalize_url(url: str) -> str:
+    """Normalize URLs extracted from Telegram messages."""
+    return url.strip().rstrip(").,!?]>\"'")
+
+
+@beartype
+def extract_message_urls(text: str) -> list[str]:
+    """Extract unique normalized URLs from a message."""
+    urls: list[str] = []
+    seen: set[str] = set()
+    for raw_url in URL_RE.findall(text):
+        normalized = normalize_url(raw_url)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        urls.append(normalized)
+    return urls
+
+
+@beartype
+def collect_weekly_material_candidates(
+    messages: list[dict[str, object]],
+    top_n: int = 5,
+) -> list[dict[str, object]]:
+    """Aggregate the most-cited materials from the last week."""
+    candidates: dict[str, dict[str, object]] = {}
+
+    for msg in messages:
+        text = str(msg.get("text", "")).strip()
+        if not text:
+            continue
+
+        urls = extract_message_urls(text)
+        if not urls:
+            continue
+
+        sender = str(msg.get("sender_name", "Unknown")).strip() or "Unknown"
+        date_str = str(msg.get("date", ""))
+        snippet = " ".join(text.split())
+        if len(snippet) > 220:
+            snippet = f"{snippet[:217]}..."
+
+        try:
+            score = float(msg.get("signal_score", msg.get("engagement_score", 0.0)))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            score = 0.0
+
+        for url in urls:
+            item = candidates.setdefault(
+                url,
+                {
+                    "url": url,
+                    "mentions": 0,
+                    "score": 0.0,
+                    "senders": set(),
+                    "snippets": [],
+                    "first_seen": date_str,
+                    "last_seen": date_str,
+                    "domain": urlparse(url).netloc.replace("www.", ""),
+                },
+            )
+            item["mentions"] = int(item["mentions"]) + 1
+            item["score"] = float(item["score"]) + 1.0 + score
+
+            senders = item["senders"]
+            if isinstance(senders, set):
+                senders.add(sender)
+
+            snippets = item["snippets"]
+            if isinstance(snippets, list) and snippet and snippet not in snippets and len(snippets) < 3:
+                snippets.append(snippet)
+
+            first_seen = str(item.get("first_seen", ""))
+            last_seen = str(item.get("last_seen", ""))
+            if date_str and (not first_seen or date_str < first_seen):
+                item["first_seen"] = date_str
+            if date_str and (not last_seen or date_str > last_seen):
+                item["last_seen"] = date_str
+
+    ranked = sorted(
+        candidates.values(),
+        key=lambda item: (
+            float(item.get("score", 0.0)),
+            int(item.get("mentions", 0)),
+        ),
+        reverse=True,
+    )
+
+    normalized: list[dict[str, object]] = []
+    for item in ranked[:top_n]:
+        senders = item.get("senders", set())
+        snippets = item.get("snippets", [])
+        normalized.append(
+            {
+                "url": str(item.get("url", "")),
+                "domain": str(item.get("domain", "")),
+                "mentions": int(item.get("mentions", 0)),
+                "score": round(float(item.get("score", 0.0)), 2),
+                "senders": sorted(str(sender) for sender in senders)[:4] if isinstance(senders, set) else [],
+                "snippets": [str(snippet) for snippet in snippets][:3] if isinstance(snippets, list) else [],
+                "first_seen": str(item.get("first_seen", "")),
+                "last_seen": str(item.get("last_seen", "")),
+            }
+        )
+    return normalized
+
+
+@beartype
+def render_weekly_materials_fallback(candidates: list[dict[str, object]]) -> str | None:
+    """Render weekly materials deterministically if the model output is weak."""
+    if not candidates:
+        return None
+
+    lines = ["*Топ материалы за неделю*"]
+    for item in candidates:
+        url = str(item.get("url", ""))
+        if not url:
+            continue
+
+        domain = str(item.get("domain", "")) or url
+        mentions = int(item.get("mentions", 0))
+        senders = item.get("senders", [])
+        snippets = item.get("snippets", [])
+
+        reason_parts = [f"упоминали {mentions} раз" if mentions > 1 else "принесли в чат"]
+        if isinstance(senders, list) and senders:
+            reason_parts.append(f"тащили {', '.join(str(sender) for sender in senders[:3])}")
+        if isinstance(snippets, list) and snippets:
+            reason_parts.append(str(snippets[0]))
+
+        lines.append(f"- [{domain}]({url}) — {'; '.join(reason_parts)}")
+
+    return "\n".join(lines) if len(lines) > 1 else None
+
+
+@beartype
+def build_weekly_materials_section(messages: list[dict[str, object]]) -> str | None:
+    """Build a compact 7-day top-materials block from chat-shared URLs."""
+    candidates = collect_weekly_material_candidates(messages)
+    if not candidates:
+        return None
+
+    payload_lines: list[str] = []
+    for index, item in enumerate(candidates, start=1):
+        snippets = item.get("snippets", [])
+        snippet_block = "\n".join(
+            f"- {snippet}" for snippet in snippets[:3]
+        ) if isinstance(snippets, list) and snippets else "- нет сниппетов"
+        senders = item.get("senders", [])
+        payload_lines.append(
+            "\n".join([
+                f"{index}. url={item['url']}",
+                f"domain={item['domain']}",
+                f"mentions={item['mentions']}",
+                f"score={item['score']}",
+                f"senders={', '.join(str(sender) for sender in senders)}",
+                "snippets:",
+                snippet_block,
+            ])
+        )
+
+    generated = ""
+    try:
+        generated = call_gemini(
+            WEEKLY_MATERIALS_PROMPT,
+            "\n\n".join(payload_lines),
+            model=GEMINI_MODEL_FAST,
+        ).strip()
+    except Exception as e:
+        print(f"    WEEKLY MATERIALS error: {e}")
+
+    if generated:
+        normalized = generated.strip()
+        if normalized.startswith("### Топ материалы за неделю"):
+            normalized = normalized.replace("### Топ материалы за неделю", "*Топ материалы за неделю*", 1)
+        elif not normalized.startswith("*Топ материалы за неделю*"):
+            normalized = f"*Топ материалы за неделю*\n{normalized}"
+        link_count = len(re.findall(r"\[.+?\]\(https?://.+?\)", normalized))
+        if link_count >= max(1, min(2, len(candidates))):
+            return normalized
+
+    return render_weekly_materials_fallback(candidates)
+
+
+@beartype
+def inject_weekly_materials_section(digest: str, weekly_section: str | None) -> str:
+    """Append weekly materials without touching the verified 24h digest body."""
+    if not weekly_section or "Топ материалы за неделю" in digest:
+        return digest
+    return f"{digest.rstrip()}\n\n{weekly_section.strip()}"
 
 @beartype
 def enrich_messages(messages: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -298,13 +586,27 @@ def pipeline_map(chunks: list[list[dict[str, object]]]) -> list[str]:
 
 
 @beartype
-def pipeline_reduce(group_name: str, topics: list[str]) -> str:
-    """REDUCE: assemble topics into final digest (pro model)."""
-    date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y")
+def pipeline_reduce(
+    group_name: str,
+    topics: list[str],
+    messages: list[dict[str, object]],
+    hours: int,
+    window_end: datetime | None = None,
+) -> str:
+    """REDUCE: assemble topics into a time-bounded digest."""
+    current_window_end = window_end or utc_now()
+    date_str = current_window_end.astimezone(MOSCOW_TZ).strftime("%d.%m.%Y")
+    window_label = format_window_label(current_window_end, hours)
+    freshness_context = build_freshness_context(messages, current_window_end, hours)
     prompt = REDUCE_PROMPT.format(group_name=group_name, date=date_str)
-    combined = "\n\n---\n\n".join(f"Тема {i+1}:\n{t}" for i, t in enumerate(topics))
+    combined = (
+        f"ОКНО НАБЛЮДЕНИЯ:\n{window_label}\n\n"
+        f"КОНТЕКСТ СВЕЖЕСТИ:\n{freshness_context}\n\n"
+        + "\n\n---\n\n".join(f"Тема {i+1}:\n{t}" for i, t in enumerate(topics))
+    )
     print(f"    REDUCE ({len(topics)} topics → digest)...")
-    return call_gemini(prompt, combined)
+    digest = call_gemini(prompt, combined)
+    return inject_window_label(digest, window_label)
 
 
 @beartype
@@ -326,9 +628,13 @@ def has_verification_issues(verify_result: str) -> bool:
 # --- Load ---
 
 @beartype
-def load_recent_messages(hours: int) -> dict[str, list[dict[str, object]]]:
+def load_recent_messages(
+    hours: int,
+    window_end: datetime | None = None,
+) -> dict[str, list[dict[str, object]]]:
     """Load messages from all groups within the time window."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    current_window_end = window_end or utc_now()
+    cutoff = current_window_end - timedelta(hours=hours)
     result: dict[str, list[dict[str, object]]] = {}
 
     for group in GROUPS:
@@ -344,14 +650,11 @@ def load_recent_messages(hours: int) -> dict[str, list[dict[str, object]]]:
             date_str = str(msg.get("date", ""))
             if not date_str:
                 continue
-            try:
-                msg_date = datetime.fromisoformat(date_str)
-                if msg_date.tzinfo is None:
-                    msg_date = msg_date.replace(tzinfo=timezone.utc)
-                if msg_date >= cutoff:
-                    recent.append(msg)
-            except ValueError:
+            msg_date = parse_message_date(date_str)
+            if msg_date is None:
                 continue
+            if msg_date >= cutoff:
+                recent.append(msg)
 
         if recent:
             result[group.name] = recent
@@ -402,8 +705,13 @@ def main() -> None:
         print("Error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required", file=sys.stderr)
         sys.exit(1)
 
+    current_window_end = utc_now()
     print(f"Loading messages from last {args.hours}h...")
-    groups_messages = load_recent_messages(args.hours)
+    groups_messages = load_recent_messages(args.hours, window_end=current_window_end)
+    weekly_groups_messages = load_recent_messages(
+        WEEKLY_MATERIALS_HOURS,
+        window_end=current_window_end,
+    )
 
     if not groups_messages:
         print("No recent messages found. Run monitor.py first.")
@@ -432,9 +740,13 @@ def main() -> None:
         topics = pipeline_map(chunks)
 
         # 4. REDUCE
-        digest = pipeline_reduce(group_name, topics)
-        print(f"\n{digest}\n")
-        print(f"Length: {len(digest)} chars")
+        digest = pipeline_reduce(
+            group_name,
+            topics,
+            top,
+            args.hours,
+            window_end=current_window_end,
+        )
 
         # 5. VERIFY
         if not args.no_verify:
@@ -444,13 +756,24 @@ def main() -> None:
             if has_verification_issues(verify_result):
                 print("\n  WARNING: verification flagged issues, check output above")
 
+        weekly_messages = weekly_groups_messages.get(group_name, [])
+        if weekly_messages:
+            weekly_enriched = enrich_messages(weekly_messages)
+            weekly_section = build_weekly_materials_section(weekly_enriched)
+            digest = inject_weekly_materials_section(digest, weekly_section)
+            if weekly_section:
+                print(f"  WEEKLY MATERIALS: {len(weekly_messages)} messages scanned")
+
+        print(f"\n{digest}\n")
+        print(f"Length: {len(digest)} chars")
+
         if args.dry_run:
             print("Dry run — not sending")
             continue
 
         # Save and send
         safe_name = group_name.lower().replace(" ", "_").replace("(", "").replace(")", "")
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_str = current_window_end.astimezone(MOSCOW_TZ).strftime("%Y-%m-%d")
         md_path = DATA_DIR / f"{safe_name}_digest_{date_str}.md"
         md_path.write_text(digest, encoding="utf-8")
         print(f"Saved: {md_path}")
