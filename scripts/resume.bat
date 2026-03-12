@@ -6,7 +6,7 @@ set "ROOT=%~dp0.."
 cd /d "%ROOT%"
 
 echo ========================================
-echo   Claude Code - Session Start
+echo   Claude Code - Session Resume
 echo   Project: %CD%
 echo ========================================
 echo.
@@ -17,6 +17,6 @@ if exist "%ROOT%\tools\tg-bridge\main.py" (
   echo.
 )
 
-claude "Session start. Read CURRENT_CONTEXT.md and PROJECT_CONTEXT.md first. Open DEV_CONTEXT.md only if needed. Then give a brief status, active track, and next step."
+claude "Resume session. Read CURRENT_CONTEXT.md, PROJECT_CONTEXT.md, and DEV_CONTEXT.md. Reconstruct the latest state, summarize what was done, name the active track, blockers if any, and the exact next step."
 
 endlocal

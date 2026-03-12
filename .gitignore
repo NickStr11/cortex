@@ -60,11 +60,16 @@ screenshots/
 tg/
 
 # TG Monitor data (messages JSON + Telethon session)
-data/tg-groups/
+data/
 *.session
+
+# Runtime working directory (temp copies, generated files)
+runtime/
 
 # TG Bridge history
 tools/tg-bridge/history.json
+tools/tg-pharma/audit.jsonl
+tools/tg-pharma/chat_state.json
 
 # Generated covers & assets
 tools/kwork-monitor/covers/
