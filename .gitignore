@@ -70,6 +70,7 @@ runtime/
 tools/tg-bridge/history.json
 tools/tg-pharma/audit.jsonl
 tools/tg-pharma/chat_state.json
+tools/tg-pharma/voice_draft_state/
 
 # Generated covers & assets
 tools/kwork-monitor/covers/

@@ -53,17 +53,15 @@ UPDATE products SET id_name = 358502 WHERE ean = '4670033321227' AND supplier = 
 - Runtime now uses `BotRefsClient` for identity/alias resolution and keeps `bot_analytics.db` only as legacy fallback.
 
 ## Последнее обновление
-- Дата: 2026-03-11
-- `tools/tg-pharma`: local analytics SQLite built from `C:\Users\User\Desktop\SKLIT` and wired into runtime.
-- New derived DB: `D:\code\2026\2\cortex\tools\tg-pharma\data\bot_analytics.db`
-- Counts: 92,323 catalog products, 141,496 alias EAN rows, 85,733 purchase lines.
-- Bot now prefers local analytics for `resolve_product` and `purchase_stats`, then falls back to VPS SSH history.
+- Дата: 2026-03-12
+- PharmOrder VPS: EAN override механизм для кривых маппингов в sklit_cache.db. Живой пример зафиксирован и починен.
+- Аудит показал: 50 конфликтных EAN из 63K (0.1%) — в основном расходники/варианты, не лекарства. Системной эпидемии нет.
 
 ## Текущий статус
-- Этап: TG digest raw chat + PharmOrder UI + Sozvezdie matrix investigation.
-- Последнее действие: сессия 30 — `tools/tg-pharma/` MVP для Telegram inventory control (voice/text → parse → search → preview → confirm → apply), плюс smoke на живом PharmOrder API без write.
-- Текущий фокус: **PharmOrder** (Sozvezdie supplier matrix + tg-pharma MVP) + **TG Digest** (NotebookLM raw chat). Детали: `CURRENT_CONTEXT.md`
-- Следующий шаг: PharmOrder — добить live Telegram smoke для `tg-pharma`, затем вернуться к Sozvezdie supplier matrix и заполнению `matrix_suppliers`.
+- Этап: PharmOrder стабилен, EAN override работает. tg-pharma batch mode готов.
+- Последнее действие: сессия 32 — диагностика и фикс азитромицин Вертекс/ПУЛЬС не видного в PharmOrder; добавлен persistent override механизм на VPS.
+- Текущий фокус: **PharmOrder** (tg-pharma live smoke + Sozvezdie matrix_suppliers) + **TG Digest** (таймер на VM работает).
+- Следующий шаг: live smoke `@pharmorder_ops_bot` — проверить `ко-перинева` и dynamic periods в живом чате.
 
 ## История изменений
 
@@ -631,3 +629,34 @@ heartbeat.yml (cron), code-review.yml (PR review), jules-trigger.yml (auto-trigg
 - Self-improving rules (агент пишет новые правила при ошибках)
 - Веб-дашборд для визуализации Issues/PR pipeline
 - Open-source launch: r/ClaudeAI, Show HN
+
+## 2026-03-13 tg-pharma fixes
+
+- `tg-pharma` moved to dedicated bot `@pharmorder_ops_bot`; no shared token with the working pharmacy order bot.
+- Inventory voice/text write detection was tightened: read-like phrases should not steal write commands into `purchase_stats`, and spoken write verbs like `добавим / закинем / поставим` are now part of the write-intent surface.
+- Voice draft follow-up and product resolution work continues, but the practical next step is no longer patching one phrase at a time — it is moving toward structured extraction + constraint resolver + verifier.
+
+---
+
+## 2026-03-13 PharmOrder inventory panel fixes (session 2)
+
+Все изменения задеплоены напрямую на VPS (`C:/tmp/index_pharmorder.html` → `/opt/pharmorder/src/static/index.html`). В git не коммитились.
+
+### tg-pharma long_voice pipeline
+- Верифицированы все 5 улучшений: `segment_actions.py` + `long_voice.py` компилятся, логика корректна
+- `_merge_actions()`: add+add агрегирует, set/delete last-wins, mixed→last absolute
+- `_apply_resolved_partial()`: partial apply — failed EAN остаются в `draft.resolved`
+
+### PharmOrder inventory panel (VPS index.html)
+- **min_qty per item**: `setInvMin` теперь сохраняет через `/api/inventory/set-min` API (раньше localStorage)
+- **invEditMin**: полностью переписан — in-place DOM swap (`span.replaceWith(input)`), без `loadInventory()`. Убраны: `invBeginMinEdit`, `invCancelMinEdit`, `invSaveMinEdit`, дубликат старого `invEditMin`
+- **Qty input ширина**: 36px → 48px (двузначные числа перестали обрезаться)
+- **Stats badge**: `invCount` теперь `items.length` (все позиции), а не только `in_stock`; `invStats` = "X позиц. · Y в наличии · Z шт."
+- **_refreshInvStats()**: новая функция — читает текущие `.inv-row-qty` инпуты, обновляет счётчики без сетевого запроса и перерисовки DOM
+- **Root cause of qty not saving**: `invQuickSet` вызывал `loadInventory()` после сохранения → перерисовка DOM уничтожала набранные значения в параллельно редактируемых позициях. Заменено на `_refreshInvStats()`
+- **Garbled toasts**: `'??????? ????? 0 ??? ??????'` → `'Количество не может быть меньше 0'`; `'?????? ??????????'` → `'Ошибка сохранения'`; `prompt('????? ???????...')` → нормальный русский текст
+- `invPromptEdit` тоже переведён на `_refreshInvStats()`
+
+### Статус
+- PharmOrder VPS inventory panel — стабилен. Min qty работает. Qty сохраняется без гонок.
+- Следующий шаг: smoke-тест в браузере (набрать qty в 2 позиции подряд → убедиться что оба сохраняются)
