@@ -25,6 +25,7 @@ from history_client import (
 )
 from intent import IntentParser, ParsedIntent
 from pharm_api import InventoryItem, PharmOrderAPI, PharmOrderError, ProductCandidate
+from segment_actions import load_draft
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -32,7 +33,8 @@ ROOT_ENV = ROOT_DIR / ".env"
 LOCAL_ENV = SCRIPT_DIR / ".env"
 AUDIT_LOG = SCRIPT_DIR / "audit.jsonl"
 CHAT_STATE_FILE = SCRIPT_DIR / "chat_state.json"
-BOT_BUILD = "2026-03-12-batch-draft-1"
+BOT_BUILD = "2026-03-14-history-choice-followup-fix-1"
+LONG_VOICE_THRESHOLD_SECONDS = 60
 PENDING_TTL_SECONDS = int(os.environ.get("PHARMA_PENDING_TTL_SECONDS", "900"))
 PENDING_CLEANUP_INTERVAL_SECONDS = int(os.environ.get("PHARMA_PENDING_CLEANUP_INTERVAL_SECONDS", "60"))
 
@@ -123,6 +125,7 @@ class ChatState:
     recent_queries: list[str] = field(default_factory=list)
     recent_turns: list[str] = field(default_factory=list)
     recent_candidates: list[dict[str, str]] = field(default_factory=list)
+    last_inventory_hint: dict[str, Any] | None = None
     last_deleted: dict[str, Any] | None = None
     batch_active: bool = False
     batch_items: list[dict[str, Any]] = field(default_factory=list)
@@ -167,6 +170,18 @@ def load_chat_states() -> dict[int, ChatState]:
                 for item in value.get("recent_candidates", [])
                 if isinstance(item, dict)
             ],
+            last_inventory_hint=(
+                {
+                    "operation": str(value.get("last_inventory_hint", {}).get("operation", "")).strip(),
+                    "qty": int(value.get("last_inventory_hint", {}).get("qty", 0) or 0),
+                    "query": str(value.get("last_inventory_hint", {}).get("query", "")).strip(),
+                    "ean": str(value.get("last_inventory_hint", {}).get("ean", "")).strip(),
+                    "name": str(value.get("last_inventory_hint", {}).get("name", "")).strip(),
+                    "maker": str(value.get("last_inventory_hint", {}).get("maker", "")).strip(),
+                }
+                if isinstance(value.get("last_inventory_hint"), dict)
+                else None
+            ),
             last_deleted=(
                 {
                     "ean": str(value.get("last_deleted", {}).get("ean", "")).strip(),
@@ -211,6 +226,7 @@ def save_chat_states_locked() -> None:
             "recent_queries": state.recent_queries[-10:],
             "recent_turns": state.recent_turns[-20:],
             "recent_candidates": state.recent_candidates[-8:],
+            "last_inventory_hint": state.last_inventory_hint,
             "last_deleted": state.last_deleted,
             "batch_active": state.batch_active,
             "batch_items": state.batch_items[-200:],
@@ -244,7 +260,7 @@ def friendly_period_label(period: str) -> str:
     }
     if period in named:
         return named[period]
-    match = re.fullmatch(r"last_(\\d+)_days", period or "")
+    match = re.fullmatch(r"last_(\d+)_days", period or "")
     if match:
         return f"за {int(match.group(1))} дней"
     return period
@@ -441,6 +457,45 @@ def remember_candidates(chat_id: int, ranked: list[RankedCandidate]) -> None:
 
 
 @beartype
+def remember_summary_candidates(chat_id: int, rows: list[HistoryProductSummary]) -> None:
+    if not rows:
+        return
+    state = get_chat_state(chat_id)
+    with CHAT_STATE_LOCK:
+        state.recent_candidates = [
+            {
+                "ean": item.ean,
+                "name": item.name,
+                "maker": item.maker,
+            }
+            for item in rows[:8]
+        ]
+        save_chat_states_locked()
+
+
+@beartype
+def remember_inventory_hint(
+    chat_id: int,
+    *,
+    operation: str,
+    query: str,
+    qty: int,
+    item: RankedCandidate,
+) -> None:
+    state = get_chat_state(chat_id)
+    with CHAT_STATE_LOCK:
+        state.last_inventory_hint = {
+            "operation": operation.strip(),
+            "qty": int(qty or 0),
+            "query": query.strip(),
+            "ean": item.candidate.ean,
+            "name": item.candidate.name,
+            "maker": item.candidate.maker,
+        }
+        save_chat_states_locked()
+
+
+@beartype
 def get_last_deleted_snapshot(chat_id: int) -> dict[str, Any] | None:
     state = get_chat_state(chat_id)
     snapshot = state.last_deleted or None
@@ -627,12 +682,18 @@ def batch_summary_text(chat_id: int, *, detailed: bool = True) -> str:
 
 @beartype
 def short_period_label(period: str) -> str:
-    return {
+    named = {
         "last_month": "в прошлом месяце",
         "this_month": "в этом месяце",
         "last_90_days": "за 90 дней",
         "all_time": "за всё время",
-    }.get(period, period)
+    }
+    if period in named:
+        return named[period]
+    match = re.fullmatch(r"last_(\d+)_days", period or "")
+    if match:
+        return f"за {int(match.group(1))} дней"
+    return period
 
 
 @beartype
@@ -755,6 +816,69 @@ CONTEXT_QUERY_MARKERS = (
     "эту штуку",
 )
 
+FOLLOWUP_CONFIRM_WORDS = (
+    "да",
+    "ага",
+    "угу",
+    "верно",
+    "точно",
+    "именно",
+    "подтверждаю",
+)
+
+FOLLOWUP_ADD_WORDS = ("добавь", "добавить", "в остатки", "закинь", "кинь", "брось", "докинь", "накинь")
+FOLLOWUP_SUB_WORDS = ("убавь", "спиши", "уменьши", "убери", "вычти")
+FOLLOWUP_SET_WORDS = ("поставь", "сделай", "установи")
+FOLLOWUP_DELETE_WORDS = ("удали", "снеси", "выпили", "убери совсем")
+FOLLOWUP_DRAFT_APPLY_WORDS = (
+    "применяй",
+    "применить",
+    "добавь это",
+    "добавь их",
+    "добавь всё",
+    "добавь все",
+    "да добавь",
+    "да применяй",
+    "да применить",
+    "в остатки",
+)
+
+VOICE_DRAFT_DETAILS_HINTS = (
+    "что за производител",
+    "какой производитель у позиции",
+    "какие производители у позиций",
+    "производители тех что",
+    "производители тех, что",
+    "что за позиции",
+    "какие там позиции",
+    "что ты предложил",
+    "что ты предлагаешь",
+    "что в предложении",
+    "в твоем предложении",
+    "в черновике",
+    "покажи черновик",
+)
+
+VOICE_DRAFT_DETAIL_KEYWORDS = (
+    "производител",
+    "позици",
+    "предлага",
+    "предложил",
+    "черновик",
+)
+
+VOICE_DRAFT_DETAIL_REFERENTS = (
+    "тех",
+    "этих",
+    "эти",
+    "того",
+    "там",
+    "предлагаешь",
+    "предложил",
+    "предложении",
+    "черновик",
+)
+
 
 @beartype
 def refine_query_with_context(chat_id: int, action: str, query: str) -> str:
@@ -763,6 +887,9 @@ def refine_query_with_context(chat_id: int, action: str, query: str) -> str:
     state = get_chat_state(chat_id)
     focus = state.last_product_focus.strip()
     lowered_query = query.lower().strip()
+    recent_reference = recent_candidate_reference(chat_id, lowered_query)
+    if recent_reference and action in {"set_inventory", "add_inventory", "subtract_inventory", "delete_inventory", "show_inventory"}:
+        return recent_reference
     if focus and any(marker in lowered_query for marker in CONTEXT_QUERY_MARKERS):
         return focus
     candidate_matches: list[dict[str, str]] = []
@@ -774,8 +901,10 @@ def refine_query_with_context(chat_id: int, action: str, query: str) -> str:
     meaningful_alpha = [token for token in tokens if re.search(r"[а-яёa-z]", token) and token not in FOLLOWUP_STOPWORDS]
     numeric_tokens = [token for token in tokens if re.fullmatch(r"\d+(?:[.,]\d+)?", token)]
     normalized_alpha = [normalize_alias_token(token) for token in meaningful_alpha if normalize_alias_token(token)]
+    strong_meaningful_alpha = [token for token in meaningful_alpha if len(normalize_alias_token(token)) >= 4]
+    strong_normalized_alpha = [token for token in normalized_alpha if len(token) >= 4]
 
-    if normalized_alpha and not state.recent_candidates and state.recent_queries:
+    if strong_normalized_alpha and not state.recent_candidates and state.recent_queries:
         for recent_query in reversed(state.recent_queries):
             recent_query = recent_query.strip()
             if not recent_query or recent_query.casefold() == query.casefold():
@@ -788,10 +917,10 @@ def refine_query_with_context(chat_id: int, action: str, query: str) -> str:
                 state = get_chat_state(chat_id)
                 break
 
-    if normalized_alpha and state.recent_candidates:
+    if strong_normalized_alpha and state.recent_candidates:
         for candidate in state.recent_candidates:
             aliases = candidate_aliases(candidate.get("name", ""), candidate.get("maker", ""))
-            if any(any(alias in token or token in alias for alias in aliases) for token in normalized_alpha):
+            if any(any(alias in token or token in alias for alias in aliases) for token in strong_normalized_alpha):
                 candidate_matches.append(candidate)
         if len(candidate_matches) > 1 and numeric_tokens:
             filtered = [
@@ -811,17 +940,45 @@ def refine_query_with_context(chat_id: int, action: str, query: str) -> str:
         return query
 
     focus_words = {token for token in re.findall(r"[а-яёa-z]+", focus.lower()) if token}
-    if meaningful_alpha and meaningful_alpha[0] not in focus_words and not candidate_matches:
+    if strong_meaningful_alpha and strong_meaningful_alpha[0] not in focus_words and not candidate_matches:
         return query
-    if focus_words & set(meaningful_alpha):
+    if focus_words & set(strong_meaningful_alpha):
         return query
-    if not meaningful_alpha and not numeric_tokens:
+    if not strong_meaningful_alpha and not numeric_tokens:
         return query
 
     carry_numbers = numeric_tokens if dose_hints_for_query(" ".join(numeric_tokens)) else []
-    suffix = " ".join([*meaningful_alpha, *carry_numbers]).strip()
+    suffix = " ".join([*strong_meaningful_alpha, *carry_numbers]).strip()
     combined = focus if not suffix else f"{focus} {suffix}"
     return " ".join(combined.split())
+
+
+@beartype
+def recent_candidate_reference(chat_id: int, query: str) -> str | None:
+    state = get_chat_state(chat_id)
+    if not state.recent_candidates:
+        return None
+    lowered = query.lower().replace("ё", "е")
+    index: int | None = None
+    ordinal_markers = (
+        (0, ("первый вариант", "первую позицию", "первый", "номер один", "вариант номер один")),
+        (1, ("второй вариант", "вторую позицию", "второй", "номер два", "вариант номер два")),
+        (2, ("третий вариант", "третью позицию", "третий", "номер три", "вариант номер три")),
+    )
+    for candidate_index, markers in ordinal_markers:
+        if any(marker in lowered for marker in markers):
+            index = candidate_index
+            break
+    if index is None:
+        return None
+    if index >= len(state.recent_candidates):
+        return None
+    candidate = state.recent_candidates[index]
+    name = candidate.get("name", "").strip()
+    maker = candidate.get("maker", "").strip()
+    if not name:
+        return None
+    return f"{name} {maker}".strip()
 
 
 @beartype
@@ -856,6 +1013,92 @@ def name_matches_dose_hints(name: str, query: str) -> bool:
         return True
     normalized = name.lower().replace(" ", "")
     return any(hint in normalized for hint in hints)
+
+
+@beartype
+def query_prefers_non_forte(query: str) -> bool:
+    lowered = query.lower()
+    if "форте" in lowered:
+        return False
+    return any(marker in lowered for marker in ("обыч", "обычного", "обычный", "не форте"))
+
+
+@beartype
+def query_prefers_non_combo(query: str) -> bool:
+    lowered = query.lower()
+    if "+" in lowered:
+        return False
+    combo_markers = (
+        "плюс",
+        "с ",
+        "и ",
+        "комбо",
+        "комбинир",
+        "валсарт",
+        "лизиноприл",
+        "периндоприл",
+        "олмесарт",
+    )
+    return not any(marker in lowered for marker in combo_markers)
+
+
+@beartype
+def infer_followup_inventory_intent(chat_id: int, text: str) -> ParsedIntent | None:
+    lowered = text.lower().strip()
+    if not lowered:
+        return None
+    if not any(word in lowered for word in FOLLOWUP_CONFIRM_WORDS):
+        return None
+    state = get_chat_state(chat_id)
+    hint = state.last_inventory_hint or {}
+    focus = state.last_product_focus.strip()
+    query = str(hint.get("name", "") or focus).strip()
+    qty = int(hint.get("qty", 0) or 0)
+    if not query:
+        return None
+
+    action = ""
+    if any(word in lowered for word in FOLLOWUP_DELETE_WORDS):
+        action = "delete_inventory"
+    elif any(word in lowered for word in FOLLOWUP_SUB_WORDS):
+        action = "subtract_inventory"
+    elif any(word in lowered for word in FOLLOWUP_SET_WORDS):
+        action = "set_inventory"
+    elif any(word in lowered for word in FOLLOWUP_ADD_WORDS):
+        action = "add_inventory"
+    elif str(hint.get("operation", "")).strip():
+        action = str(hint["operation"]).strip()
+
+    if not action:
+        return None
+    if action != "delete_inventory" and qty <= 0:
+        return None
+
+    return ParsedIntent(
+        action=action,
+        query=query,
+        qty=None if action == "delete_inventory" else qty,
+        period=state.last_period or "last_month",
+        confidence=0.85,
+        note="followup_inventory_hint",
+    )
+
+
+@beartype
+def should_apply_recent_voice_draft(chat_id: int, text: str) -> bool:
+    lowered = text.lower().strip()
+    if not lowered:
+        return False
+    if not any(word in lowered for word in FOLLOWUP_CONFIRM_WORDS):
+        return False
+    if not any(phrase in lowered for phrase in FOLLOWUP_DRAFT_APPLY_WORDS):
+        return False
+    draft = load_draft(chat_id)
+    if not draft:
+        return False
+    if draft.apply_status != "pending":
+        return False
+    return bool(draft.resolved)
 
 
 @beartype
@@ -1088,16 +1331,15 @@ def collect_candidates(query: str) -> list[tuple[ProductCandidate, CatalogProduc
         payload = (canonical_candidate, row)
         merged[identity_key] = choose_better_candidate(merged[identity_key], payload) if identity_key in merged else payload
 
-    if not merged:
-        try:
-            for item in get_purchase_summary(query, period="all_time", limit=5):
-                canonical_candidate, identity_key = resolve_candidate_identity(
-                    ProductCandidate(ean=item.ean, name=item.name, maker=item.maker, id_name=None)
-                )
-                payload = (canonical_candidate, None)
-                merged[identity_key] = choose_better_candidate(merged[identity_key], payload) if identity_key in merged else payload
-        except Exception:
-            pass
+    try:
+        for item in get_purchase_summary(query, period="all_time", limit=5):
+            canonical_candidate, identity_key = resolve_candidate_identity(
+                ProductCandidate(ean=item.ean, name=item.name, maker=item.maker, id_name=None)
+            )
+            payload = (canonical_candidate, None)
+            merged[identity_key] = choose_better_candidate(merged[identity_key], payload) if identity_key in merged else payload
+    except Exception:
+        pass
 
     return list(merged.values())
 
@@ -1116,6 +1358,16 @@ def build_ranked_candidates(query: str) -> list[RankedCandidate]:
         score = 0.0
         if query.casefold() in candidate.name.casefold():
             score += 35
+        if query_prefers_non_combo(query):
+            if "+" in candidate.name:
+                score -= 80
+            else:
+                score += 12
+        if query_prefers_non_forte(query):
+            if "форте" in candidate.name.casefold():
+                score -= 40
+            else:
+                score += 10
         if name_matches_dose_hints(candidate.name, query):
             score += 18
         elif dose_hints_for_query(query):
@@ -1291,6 +1543,78 @@ def make_batch_pending(chat_id: int, source_text: str) -> PendingAction | None:
 
 
 @beartype
+def make_voice_draft_pending(chat_id: int, source_text: str) -> PendingAction | None:
+    draft = load_draft(chat_id)
+    if not draft or draft.apply_status != "pending" or not draft.resolved:
+        return None
+    entries: list[dict[str, Any]] = []
+    for item in draft.resolved:
+        action = item.get("action", {})
+        entries.append(
+            {
+                "item_id": f"voice:{item.get('ean', '')}:{action.get('kind', '')}",
+                "operation": str(action.get("kind", "")).replace("inventory_", "") if False else str(action.get("kind", "")),
+                "query": str(action.get("query", "")).strip(),
+                "qty": int(action.get("qty", 0) or 0),
+                "ean": str(item.get("ean", "")).strip(),
+                "name": str(item.get("name", "")).strip(),
+                "maker": str(item.get("maker", "")).strip(),
+                "inventory_qty": None,
+                "source_text": str(action.get("raw", "")).strip(),
+                "created_at": float(draft.created_at),
+            }
+        )
+    if not entries:
+        return None
+    return PendingAction(
+        token=make_token(),
+        chat_id=chat_id,
+        source_text=source_text,
+        operation="batch_apply",
+        query="voice_draft",
+        qty=0,
+        batch_entries=entries,
+    )
+
+
+@beartype
+def should_describe_recent_voice_draft(chat_id: int, text: str) -> bool:
+    lowered = text.lower().strip()
+    if not lowered:
+        return False
+    has_explicit_hint = any(hint in lowered for hint in VOICE_DRAFT_DETAILS_HINTS)
+    has_keyword = any(keyword in lowered for keyword in VOICE_DRAFT_DETAIL_KEYWORDS)
+    has_referent = any(referent in lowered for referent in VOICE_DRAFT_DETAIL_REFERENTS)
+    if not has_explicit_hint and not (has_keyword and has_referent):
+        return False
+    draft = load_draft(chat_id)
+    return bool(draft and draft.resolved)
+
+
+@beartype
+def recent_voice_draft_reply(chat_id: int) -> str:
+    draft = load_draft(chat_id)
+    if not draft or not draft.resolved:
+        return "По последнему голосовому черновику сейчас ничего не сохранил."
+    lines = [f"По последнему голосовому черновику у меня {len(draft.resolved)} готовых позиции:"]
+    for idx, item in enumerate(draft.resolved, start=1):
+        action = item.get("action", {})
+        qty = int(action.get("qty", 0) or 0)
+        op = str(action.get("kind", "")).strip()
+        op_text = {
+            "inventory_add": f"добавить +{qty}",
+            "inventory_subtract": f"убавить -{qty}",
+            "inventory_set": f"сделать остаток {qty}",
+            "inventory_delete": "удалить из остатков",
+        }.get(op, op or "действие")
+        lines.append(f"{idx}. {item.get('name', '')}")
+        if item.get("maker"):
+            lines.append(f"   Производитель: {item.get('maker', '')}")
+        lines.append(f"   Действие: {op_text}")
+    return "\n".join(lines)
+
+
+@beartype
 def apply_batch_snapshot(chat_id: int, source_text: str, entries: list[dict[str, Any]]) -> tuple[str, int, int]:
     success_ids: set[str] = set()
     lines = ["Пачку применил."]
@@ -1384,6 +1708,21 @@ def download_voice(client: httpx.Client, file_id: str) -> Path:
 
 
 @beartype
+def extract_audio_message_payload(message: dict[str, Any]) -> dict[str, Any] | None:
+    if isinstance(message.get("voice"), dict) and message["voice"].get("file_id"):
+        return message["voice"]
+    if isinstance(message.get("audio"), dict) and message["audio"].get("file_id"):
+        return message["audio"]
+    document = message.get("document")
+    if isinstance(document, dict) and document.get("file_id"):
+        mime_type = str(document.get("mime_type") or "").lower()
+        file_name = str(document.get("file_name") or "").lower()
+        if mime_type.startswith("audio/") or file_name.endswith((".ogg", ".oga", ".mp3", ".wav", ".m4a")):
+            return document
+    return None
+
+
+@beartype
 def handle_readonly_action(
     client: httpx.Client,
     chat_id: int,
@@ -1464,34 +1803,8 @@ def handle_readonly_action(
         dose_filtered = [item for item in rows if name_matches_dose_hints(item.name, intent.query)]
         if dose_filtered:
             rows = dose_filtered
-        payload = {
-            "query": intent.query,
-            "period": intent.period,
-            "period_label": friendly_period_label(intent.period or "last_month"),
-            "rows": [
-                {
-                    "ean": item.ean,
-                    "name": item.name,
-                    "maker": item.maker,
-                    "qty_sum": int(item.qty_sum),
-                    "purchase_count": item.purchase_count,
-                    "last_date": item.last_date,
-                    "top_supplier": item.top_supplier,
-                }
-                for item in rows[:5]
-            ],
-        }
-        send_message(
-            client,
-            chat_id,
-            grounded_readonly_reply(
-                user_message=source_text,
-                state=get_chat_state(chat_id),
-                tool_name="purchase_stats",
-                tool_payload=payload,
-                fallback_text=purchase_stats_fallback_reply(intent.query, intent.period or "last_month", rows),
-            ),
-        )
+        remember_summary_candidates(chat_id, rows)
+        send_message(client, chat_id, purchase_stats_fallback_reply(intent.query, intent.period or "last_month", rows))
         return True
 
     if intent.action == "compare_suppliers":
@@ -1691,6 +2004,13 @@ def handle_intent(client: httpx.Client, chat_id: int, source_text: str, intent: 
             return
         update_chat_focus(chat_id, ranked[0].candidate.name, intent.period or "last_month")
         remember_candidates(chat_id, ranked)
+        remember_inventory_hint(
+            chat_id,
+            operation=intent.action,
+            query=intent.query,
+            qty=int(intent.qty or 0),
+            item=ranked[0],
+        )
         if state.batch_active:
             batch_item = add_batch_item(
                 chat_id,
@@ -1736,6 +2056,11 @@ def handle_intent(client: httpx.Client, chat_id: int, source_text: str, intent: 
     if intent.action == "purchase_stats":
         update_chat_focus(chat_id, intent.query, intent.period or "last_month")
         remember_candidates(chat_id, build_ranked_candidates(intent.query))
+        rows = get_purchase_summary(intent.query, period=intent.period, limit=5)
+        dose_filtered = [item for item in rows if name_matches_dose_hints(item.name, intent.query)]
+        if dose_filtered:
+            rows = dose_filtered
+        remember_summary_candidates(chat_id, rows)
         send_message(client, chat_id, purchase_stats_reply(intent.query, intent.period))
         return
 
@@ -1765,21 +2090,77 @@ def handle_message(client: httpx.Client, message: dict[str, Any]) -> None:
                 "какой у нас азитромицин; начать пачку -> покажи пачку -> применить пачку.",
             )
             return
-        handle_intent(client, chat_id, text, PARSER.parse(text))
+        if should_describe_recent_voice_draft(chat_id, text):
+            send_message(client, chat_id, recent_voice_draft_reply(chat_id))
+            return
+        if should_apply_recent_voice_draft(chat_id, text):
+            pending = make_voice_draft_pending(chat_id, text)
+            if pending:
+                put_pending(pending)
+                send_message(client, chat_id, preview_text(pending), batch_preview_buttons(pending.token))
+                return
+        parsed = PARSER.parse(text)
+        if parsed.action in {"unknown", "chat"}:
+            followup = infer_followup_inventory_intent(chat_id, text)
+            if followup is not None:
+                parsed = followup
+        handle_intent(client, chat_id, text, parsed)
         return
 
-    voice = message.get("voice") or message.get("audio")
+    voice = extract_audio_message_payload(message)
     if voice and voice.get("file_id"):
-        tmp_path = download_voice(client, str(voice["file_id"]))
+        duration = int(voice.get("duration", 0) or 0)
+        print(
+            f"[voice] chat={chat_id} duration={duration} type={'voice' if message.get('voice') else 'audio'}",
+            flush=True,
+        )
+        send_message(client, chat_id, f"🎙 Голосовое {duration}с — расшифровываю...")
         try:
-            transcript = PARSER.transcribe_voice(tmp_path)
-        finally:
-            tmp_path.unlink(missing_ok=True)
-        if not transcript:
-            send_message(client, chat_id, "Голос не расшифровал. Лучше повтори текстом.")
-            return
-        send_message(client, chat_id, f"Расслышал так: {transcript}")
-        handle_intent(client, chat_id, transcript, PARSER.parse(transcript))
+            if duration >= LONG_VOICE_THRESHOLD_SECONDS:
+                from long_voice import handle_long_voice
+
+                handle_long_voice(
+                    client=client,
+                    chat_id=chat_id,
+                    voice=voice,
+                    bot_token=BOT_TOKEN,
+                    download_fn=download_voice,
+                    transcribe_fn=PARSER.transcribe_voice,
+                    resolve_fn=build_ranked_candidates,
+                    edit_fn=edit_message,
+                    send_fn=send_message,
+                    api_key=GEMINI_API_KEY,
+                    model=GEMINI_MODEL,
+                    audit_fn=audit,
+                    api=API,
+                )
+                return
+            tmp_path = download_voice(client, str(voice["file_id"]))
+            try:
+                transcript = PARSER.transcribe_voice(tmp_path)
+            finally:
+                tmp_path.unlink(missing_ok=True)
+            if not transcript:
+                send_message(client, chat_id, "Голос не расшифровал. Лучше повтори текстом.")
+                return
+            from long_voice import maybe_process_short_voice_as_draft
+
+            if maybe_process_short_voice_as_draft(
+                client=client,
+                chat_id=chat_id,
+                transcript=transcript,
+                bot_token=BOT_TOKEN,
+                resolve_fn=build_ranked_candidates,
+                edit_fn=edit_message,
+                api_key=GEMINI_API_KEY,
+                model=GEMINI_MODEL,
+            ):
+                return
+            send_message(client, chat_id, f"Расслышал так: {transcript}")
+            handle_intent(client, chat_id, transcript, PARSER.parse(transcript))
+        except Exception as exc:
+            print(f"[voice-error] chat={chat_id} {type(exc).__name__}: {exc}", flush=True)
+            send_message(client, chat_id, "С аудио сейчас споткнулся. Перешли его ещё раз или кинь текстом одну фразу.")
 
 
 @beartype
@@ -1852,6 +2233,21 @@ def handle_callback(client: httpx.Client, callback: dict[str, Any]) -> None:
         action.selected_index = max(0, min(int(raw_idx), len(action.ranked) - 1))
         edit_message(client, chat_id, message_id, preview_text(action), preview_buttons(token, len(action.ranked) > 1))
         answer_callback(client, callback_id)
+        return
+
+    if data.startswith("lv_"):
+        from long_voice import handle_lv_callback
+        handle_lv_callback(
+            client=client,
+            chat_id=chat_id,
+            message_id=message_id,
+            callback_id=callback_id,
+            data=data,
+            answer_fn=answer_callback,
+            edit_fn=edit_message,
+            api=API,
+            audit_fn=audit,
+        )
         return
 
     if data.startswith("apply:"):

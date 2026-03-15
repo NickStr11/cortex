@@ -79,11 +79,22 @@ INVENTORY_PREFIXES = (
 ADD_HINTS = (
     "добавь",
     "добавить",
+    "добавим",
     "прибавь",
+    "прибавим",
     "увеличь",
+    "увеличим",
     "в остатки добавить",
     "докинь",
+    "докинем",
     "накинь",
+    "накинем",
+    "закинь",
+    "закинем",
+    "кинь",
+    "кинем",
+    "брось",
+    "бросим",
     "домаркируй",
     "домаркировать",
     "плюс",
@@ -92,10 +103,41 @@ ADD_HINTS = (
 SUBTRACT_HINTS = (
     "убавь",
     "убрать",
+    "уберем",
     "уменьши",
+    "уменьшим",
     "спиши",
+    "спишем",
     "вычти",
     "убери из остатков",
+)
+
+ADD_STEM_PATTERNS = (
+    r"\bдобав\w*",
+    r"\bприбав\w*",
+    r"\bувелич\w*",
+    r"\bдокин\w*",
+    r"\bнакин\w*",
+    r"\bзакин\w*",
+    r"\bкин\w*",
+    r"\bброс\w*",
+    r"\bдомаркир\w*",
+)
+
+SUBTRACT_STEM_PATTERNS = (
+    r"\bубав\w*",
+    r"\bубер\w*",
+    r"\bуменьш\w*",
+    r"\bспиш\w*",
+    r"\bвычт\w*",
+)
+
+SET_STEM_PATTERNS = (
+    r"\bпостав\w+\s+остат\w*",
+    r"\bустанов\w+\s+остат\w*",
+    r"\bсдела\w+\s+остат\w*",
+    r"\bизмен\w+\s+остат\w*",
+    r"\bобнов\w+\s+остат\w*",
 )
 
 DELETE_HINTS = (
@@ -191,11 +233,142 @@ WORD_QTY_MAP = {
     "десять": 10,
 }
 
+NUMBER_WORDS_UNITS = {
+    "ноль": 0,
+    "один": 1,
+    "одна": 1,
+    "одно": 1,
+    "одну": 1,
+    "два": 2,
+    "две": 2,
+    "три": 3,
+    "четыре": 4,
+    "пять": 5,
+    "шесть": 6,
+    "семь": 7,
+    "восемь": 8,
+    "девять": 9,
+    "десять": 10,
+    "одиннадцать": 11,
+    "двенадцать": 12,
+    "тринадцать": 13,
+    "четырнадцать": 14,
+    "пятнадцать": 15,
+    "шестнадцать": 16,
+    "семнадцать": 17,
+    "восемнадцать": 18,
+    "девятнадцать": 19,
+}
+
+NUMBER_WORDS_TENS = {
+    "двадцать": 20,
+    "тридцать": 30,
+    "сорок": 40,
+    "пятьдесят": 50,
+    "шестьдесят": 60,
+    "семьдесят": 70,
+    "восемьдесят": 80,
+    "девяносто": 90,
+}
+
+NUMBER_WORDS_HUNDREDS = {
+    "сто": 100,
+    "двести": 200,
+    "триста": 300,
+    "четыреста": 400,
+    "пятьсот": 500,
+    "шестьсот": 600,
+    "семьсот": 700,
+    "восемьсот": 800,
+    "девятьсот": 900,
+}
+
+NUMBER_WORDS_ALL = frozenset({*NUMBER_WORDS_UNITS.keys(), *NUMBER_WORDS_TENS.keys(), *NUMBER_WORDS_HUNDREDS.keys()})
+
+PURCHASE_QUERY_FILLER_WORDS = (
+    "так",
+    "давай",
+    "ещё",
+    "еще",
+    "раз",
+    "разок",
+    "ладно",
+    "слушай",
+    "смотри",
+    "ну",
+    "ко",
+    "мне",
+)
+
+INVENTORY_FILLER_WORDS = (
+    "давай",
+    "попробуем",
+    "пожалуйста",
+    "еще",
+    "ещё",
+    "разок",
+    "снова",
+    "слушай",
+    "возьми",
+    "потом",
+    "ка",
+    "тест",
+    "очередной",
+    "очередная",
+    "очередное",
+    "очередную",
+    "тоже",
+)
+
+INVENTORY_LEADIN_NOISE_WORDS = (
+    "так",
+    "ну",
+    "что",
+    "ты",
+    "я",
+    "уже",
+    "просто",
+    "вообще",
+    "короче",
+    "реально",
+    "мне",
+    "тебе",
+    "ему",
+    "ей",
+    "нам",
+    "вам",
+    "их",
+    "блядь",
+    "блин",
+    "нахуй",
+    "заебался",
+    "заебал",
+    "писать",
+    "эти",
+    "это",
+    "аудио",
+    "голосовые",
+    "голосовухи",
+    "сообщения",
+    "сообщение",
+    "тест",
+    "очередной",
+    "очередная",
+    "очередное",
+    "очередную",
+)
+
+RECENT_VARIANT_MARKERS = (
+    ("первый вариант", ("первый вариант", "первую позицию", "вариант номер один", "номер один", "первый")),
+    ("второй вариант", ("второй вариант", "вторую позицию", "вариант номер два", "номер два", "второй")),
+    ("третий вариант", ("третий вариант", "третью позицию", "вариант номер три", "номер три", "третий")),
+)
+
 RELATIVE_PERIOD_PATTERNS = (
-    (r"за\s+(?:последн(?:ие|их|ий)\s+)?(\d{1,4})\s*д(ень|ня|ней)\b", 1),
-    (r"за\s+(?:последн(?:ие|их|ий)\s+)?(\d{1,4})\s*нед(елю|ели|ель|еля|ель)\b", 7),
-    (r"за\s+(?:последн(?:ие|их|ий)\s+)?(\d{1,4})\s*мес(яц|яца|яцев)?\b", 30),
-    (r"за\s+(?:последн(?:ие|их|ий)\s+)?(\d{1,4})\s*год(а|ов)?\b", 365),
+    (r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*(\d{1,4})\s*д(ень|ня|ней)\b", 1),
+    (r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*(\d{1,4})\s*нед(елю|ели|ель|еля|ель)\b", 7),
+    (r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*(\d{1,4})\s*мес(яц|яца|яцев)?\b", 30),
+    (r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*(\d{1,4})\s*год(а|ов)?\b", 365),
 )
 
 
@@ -251,6 +424,23 @@ def detect_relative_period(lowered: str) -> str | None:
         days = amount * multiplier
         if 1 <= days <= 3650:
             return f"last_{days}_days"
+
+    word_patterns = (
+        (r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*([а-яё -]{3,})\s*д(ень|ня|ней)\b", 1),
+        (r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*([а-яё -]{3,})\s*нед(елю|ели|ель|еля|ель)\b", 7),
+        (r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*([а-яё -]{3,})\s*мес(яц|яца|яцев)?\b", 30),
+        (r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*([а-яё -]{3,})\s*год(а|ов)?\b", 365),
+    )
+    for pattern, multiplier in word_patterns:
+        match = re.search(pattern, lowered)
+        if not match:
+            continue
+        amount = parse_spoken_number_phrase(match.group(1))
+        if amount is None:
+            continue
+        days = amount * multiplier
+        if 1 <= days <= 3650:
+            return f"last_{days}_days"
     return None
 
 
@@ -259,7 +449,114 @@ def strip_relative_period_phrases(text: str) -> str:
     stripped = text
     for pattern, _multiplier in RELATIVE_PERIOD_PATTERNS:
         stripped = re.sub(pattern, " ", stripped, flags=re.IGNORECASE)
+    for pattern in (
+        r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*[а-яё -]{3,}\s*д(ень|ня|ней)\b",
+        r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*[а-яё -]{3,}\s*нед(елю|ели|ель|еля|ель)\b",
+        r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*[а-яё -]{3,}\s*мес(яц|яца|яцев)?\b",
+        r"за\s+(?:(?:последн(?:ие|их|ий))|(?:прошедш(?:ие|их|ий))|(?:прошл(?:ые|ых|ый)))?\s*[а-яё -]{3,}\s*год(а|ов)?\b",
+    ):
+        stripped = re.sub(pattern, " ", stripped, flags=re.IGNORECASE)
     return stripped
+
+
+@beartype
+def parse_spoken_number_phrase(text: str) -> int | None:
+    tokens = [token for token in re.findall(r"[а-яё]+", text.lower().replace("ё", "е")) if token]
+    if not tokens:
+        return None
+    total = 0
+    used = False
+    for token in tokens:
+        if token in NUMBER_WORDS_HUNDREDS:
+            total += NUMBER_WORDS_HUNDREDS[token]
+            used = True
+            continue
+        if token in NUMBER_WORDS_TENS:
+            total += NUMBER_WORDS_TENS[token]
+            used = True
+            continue
+        if token in NUMBER_WORDS_UNITS:
+            total += NUMBER_WORDS_UNITS[token]
+            used = True
+            continue
+        return None
+    return total if used and total > 0 else None
+
+
+@beartype
+def strip_leading_spoken_quantity(query: str) -> str:
+    tokens = query.split()
+    if not tokens:
+        return query
+    consumed = 0
+    for token in tokens[:3]:
+        normalized = token.lower().strip(" ,.;:!?").replace("ё", "е")
+        if normalized in NUMBER_WORDS_ALL:
+            consumed += 1
+        else:
+            break
+    if consumed == 0:
+        return query
+    phrase = " ".join(tokens[:consumed])
+    if parse_spoken_number_phrase(phrase) is None:
+        return query
+    return " ".join(tokens[consumed:]).strip()
+
+
+@beartype
+def strip_leading_purchase_noise(query: str) -> str:
+    cleaned = query.strip()
+    if not cleaned:
+        return cleaned
+    pattern = rf"^(?:{'|'.join(re.escape(word) for word in PURCHASE_QUERY_FILLER_WORDS)})\b"
+    while True:
+        updated = re.sub(pattern, " ", cleaned, flags=re.IGNORECASE).strip(" ,.;:!?")
+        updated = re.sub(r"\s+", " ", updated)
+        if updated == cleaned:
+            break
+        cleaned = updated
+    return cleaned
+
+
+@beartype
+def trim_inventory_query_noise(query: str) -> str:
+    cleaned = query
+    parts = [part.strip() for part in re.split(r"[,:;!?]+", cleaned) if part.strip()]
+    if parts:
+        cleaned = parts[-1]
+    for filler in INVENTORY_LEADIN_NOISE_WORDS:
+        cleaned = re.sub(rf"\b{re.escape(filler)}\b", " ", cleaned, flags=re.IGNORECASE)
+    tokens = cleaned.split()
+    while tokens and tokens[0].casefold() in INVENTORY_LEADIN_NOISE_WORDS:
+        tokens.pop(0)
+    cleaned = " ".join(tokens)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.;:!?")
+    return cleaned
+
+
+@beartype
+def normalize_recent_variant_reference(query: str) -> str | None:
+    lowered = query.lower().replace("ё", "е")
+    for canonical, markers in RECENT_VARIANT_MARKERS:
+        if any(marker in lowered for marker in markers):
+            return canonical
+    return None
+
+
+@beartype
+def _matches_any_pattern(text: str, patterns: tuple[str, ...]) -> bool:
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+
+@beartype
+def detect_inventory_write_action(lowered: str) -> str | None:
+    if any(hint in lowered for hint in ADD_HINTS) or _matches_any_pattern(lowered, ADD_STEM_PATTERNS):
+        return "add_inventory"
+    if any(hint in lowered for hint in SUBTRACT_HINTS) or _matches_any_pattern(lowered, SUBTRACT_STEM_PATTERNS):
+        return "subtract_inventory"
+    if any(hint in lowered for hint in INVENTORY_PREFIXES) or _matches_any_pattern(lowered, SET_STEM_PATTERNS):
+        return "set_inventory"
+    return None
 
 
 @beartype
@@ -283,12 +580,14 @@ def detect_compare_period(lowered: str, primary_period: str | None = None) -> st
 def heuristic_parse_inventory_command(text: str) -> ParsedIntent | None:
     cleaned = _clean_text(text)
     lowered = cleaned.lower()
-    action = "set_inventory"
-    if any(hint in lowered for hint in ADD_HINTS):
-        action = "add_inventory"
-    elif any(hint in lowered for hint in SUBTRACT_HINTS):
-        action = "subtract_inventory"
+    action = detect_inventory_write_action(lowered) or "set_inventory"
     matched_prefix = next((prefix for prefix in INVENTORY_PREFIXES if lowered.startswith(prefix)), None)
+    if not matched_prefix:
+        for pattern in SET_STEM_PATTERNS:
+            match = re.search(pattern, lowered, flags=re.IGNORECASE)
+            if match:
+                matched_prefix = match.group(0)
+                break
     if not matched_prefix and action == "set_inventory":
         return None
 
@@ -317,13 +616,16 @@ def heuristic_parse_inventory_command(text: str) -> ParsedIntent | None:
             query = re.sub(rf"\b{re.escape(qty_word)}\b", " ", lowered, count=1).strip(" ,.;:!?")
         for hint in (*ADD_HINTS, *SUBTRACT_HINTS):
             query = query.replace(hint, " ")
-        for filler in ("давай", "попробуем", "пожалуйста", "еще", "ещё"):
+        for filler in INVENTORY_FILLER_WORDS:
             query = query.replace(filler, " ")
 
     query = re.sub(r"^(для|по)\s+", "", query, flags=re.IGNORECASE)
-    query = re.sub(r"\b(в|во)\s+остатки\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(в|во)\s+остат(ки|ке|ок)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(его|её|ее)\b", " ", query, flags=re.IGNORECASE)
     query = re.sub(r"\bок\b", " ", query, flags=re.IGNORECASE)
     query = re.sub(r"\b(шт|штук|штука|штуки)\b", " ", query, flags=re.IGNORECASE)
+    recent_variant = normalize_recent_variant_reference(query)
+    query = recent_variant or trim_inventory_query_noise(query)
     query = UNIT_SUFFIX_RE.sub("", query).strip(" ,.;:!?")
     query = re.sub(r"\s+", " ", query).strip(" ,.;:!?")
     if not query:
@@ -511,6 +813,19 @@ def heuristic_parse_compare_periods(text: str) -> ParsedIntent | None:
 def heuristic_parse_purchase_stats(text: str) -> ParsedIntent | None:
     cleaned = _clean_text(text)
     lowered = cleaned.lower().strip(" ?!.")
+    has_history_choice_hint = any(
+        marker in lowered
+        for marker in (
+            "которые мы чаще",
+            "который мы чаще",
+            "которую мы чаще",
+            "которые чаще всего",
+            "который чаще всего",
+            "которую чаще всего",
+        )
+    )
+    if looks_like_write_command(cleaned) and not has_history_choice_hint:
+        return None
     if not any(token in lowered for token in ("покупали", "берем", "берём", "заказывали", "брали")):
         return None
     if not any(token in lowered for token in ("чаще", "чаще всего", "какой", "что", "сравни", "сравнить", "у кого")):
@@ -526,6 +841,28 @@ def heuristic_parse_purchase_stats(text: str) -> ParsedIntent | None:
 
     query = lowered
     for phrase in (
+        "смотри",
+        "слушай",
+        "можешь",
+        "можно",
+        "мог бы",
+        "могла бы",
+        "поставь",
+        "поставим",
+        "добавь",
+        "добавим",
+        "оформи",
+        "оформи",
+        "повтори",
+        "повтори заказ",
+        "закажи",
+        "заказать",
+        "закажем",
+        "закажи мне",
+        "возьми",
+        "подбери",
+        "нужно",
+        "надо",
         "мы чаще покупали",
         "чаще покупали",
         "мы чаще всего берем",
@@ -572,7 +909,21 @@ def heuristic_parse_purchase_stats(text: str) -> ParsedIntent | None:
     ):
         query = query.replace(phrase, " ")
     query = strip_relative_period_phrases(query)
+    query = re.sub(r"\bкотор(ый|ая|ое|ые|ого|ому|ую|ых|ыми)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(этот|эта|это|эти|тех|того|ту|тот)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(э|ээ|э-э|ну|вот|где-то|гдето)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(шт|штук|штука|штуки|уп|упаковка|упаковки|упаковок|пачка|пачки|пачек)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b\d{1,5}\b", " ", query)
+    query = re.sub(r"\bза\s+последн(?:ие|их|ий)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\bд(ень|ня|ней)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\b(в|во|и|с|со|на|по|для|из|к|у|о|об|от|до)\b", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"[-–—]+", " ", query)
+    query = re.sub(r"[,:;]+", " ", query)
     query = re.sub(r"^(а|ну|и)\s+", " ", query, flags=re.IGNORECASE)
+    query = re.sub(r"\s+", " ", query).strip(" ,.;:!?")
+    query = strip_leading_purchase_noise(query)
+    query = strip_leading_spoken_quantity(query)
+    query = strip_leading_purchase_noise(query)
     query = re.sub(r"\s+", " ", query).strip(" ,.;:!?")
     if not query:
         return None
@@ -611,12 +962,9 @@ def heuristic_parse_batch_control(text: str) -> ParsedIntent | None:
 @beartype
 def looks_like_write_command(text: str) -> bool:
     lowered = _clean_text(text).lower()
-    return any(
+    return bool(detect_inventory_write_action(lowered)) or any(
         hint in lowered
         for hint in (
-            *INVENTORY_PREFIXES,
-            *ADD_HINTS,
-            *SUBTRACT_HINTS,
             *DELETE_HINTS,
             *CLEAR_HINTS,
             *RESTORE_HINTS,

@@ -12,6 +12,78 @@ import paramiko
 from beartype import beartype
 
 ALLOWED_PERIODS = {"last_month", "this_month", "last_90_days", "last_180_days", "all_time"}
+SOFT_QUERY_FILLERS = (
+    "давай",
+    "ещё",
+    "еще",
+    "разок",
+    "снова",
+    "слушай",
+    "возьми",
+    "потом",
+    "ка",
+    "тест",
+    "очередной",
+    "очередная",
+    "очередное",
+    "очередную",
+    "тоже",
+)
+SPECIAL_TOKEN_ALIASES: dict[str, tuple[str, ...]] = {
+    "македонский": ("македония",),
+    "македонского": ("македония",),
+    "македонскому": ("македония",),
+    "македонским": ("македония",),
+    "македонская": ("македония",),
+    "македонскую": ("македония",),
+    "венгерский": ("венгрия",),
+    "венгерского": ("венгрия",),
+    "венгерскому": ("венгрия",),
+    "хорватский": ("хорватия",),
+    "хорватского": ("хорватия",),
+    "хорватскому": ("хорватия",),
+    "активированный": ("актив",),
+    "активированного": ("актив",),
+    "активированному": ("актив",),
+    "активированным": ("актив",),
+    "активированная": ("актив",),
+    "активированную": ("актив",),
+    "угля": ("уголь",),
+    "азитромицинов": ("азитромицин",),
+    "азитромицинам": ("азитромицин",),
+    "азитромицинах": ("азитромицин",),
+}
+
+
+SPOKEN_NUMERIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "пятисотый": ("500", "0.5"),
+    "пятисотого": ("500", "0.5"),
+    "пятисотому": ("500", "0.5"),
+    "пятисотым": ("500", "0.5"),
+    "пятисотая": ("500", "0.5"),
+    "пятисотую": ("500", "0.5"),
+    "пятисотые": ("500", "0.5"),
+    "пятисотых": ("500", "0.5"),
+    "пятисотыми": ("500", "0.5"),
+    "двухсотпятидесятый": ("250", "0.25"),
+    "двухсотпятидесятого": ("250", "0.25"),
+    "двухсотпятидесятому": ("250", "0.25"),
+    "двухсотпятидесятым": ("250", "0.25"),
+    "стопятидесятый": ("150", "0.15"),
+    "стопятидесятого": ("150", "0.15"),
+    "стодвадцатипятый": ("125", "0.125"),
+    "стодвадцатипятого": ("125", "0.125"),
+    "восьмисотсемьдесятпятый": ("875", "0.875"),
+    "восьмисотсемьдесятпятого": ("875", "0.875"),
+    "тысячный": ("1000", "1.0"),
+    "тысячного": ("1000", "1.0"),
+    "сотый": ("100",),
+    "сотого": ("100",),
+    "пятидесятый": ("50",),
+    "пятидесятого": ("50",),
+    "десятый": ("10",),
+    "десятого": ("10",),
+}
 
 
 @beartype
@@ -101,12 +173,45 @@ def build_query_variants(query: str) -> list[str]:
         if normalized and normalized not in variants:
             variants.append(normalized)
 
+    def strip_soft_modifiers(value: str) -> str:
+        normalized = f" {value.strip()} "
+        normalized = re.sub(r"\bне\s+форте\b", " ", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"\bименно\b", " ", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(
+            r"\bобычн(?:ый|ого|ому|ым|ом|ая|ую|ой|ое|ые|ых|ыми)?\b",
+            " ",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(r"\b(его|её|ее)\b", " ", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(
+            rf"\b({'|'.join(re.escape(item) for item in SOFT_QUERY_FILLERS)})\b",
+            " ",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized.strip()
+
     def token_fallbacks(token: str) -> list[str]:
-        token = token.strip()
+        token = token.strip().strip(" ,.;:!?")
         if len(token) < 4:
             return []
-        options: set[str] = set()
+        options: set[str] = set(SPECIAL_TOKEN_ALIASES.get(token.lower(), ()))
+        options.update(SPOKEN_NUMERIC_ALIASES.get(token.lower(), ()))
         endings = {
+            "ов": "",
+            "ев": "",
+            "ах": "",
+            "ях": "",
+            "ых": "ый",
+            "их": "ий",
+            "ого": "ый",
+            "ому": "ый",
+            "ыми": "ый",
+            "ими": "ий",
+            "а": "",
+            "я": "",
             "у": "а",
             "ю": "я",
             "ы": "а",
@@ -120,6 +225,10 @@ def build_query_variants(query: str) -> list[str]:
         return [item for item in options if item != token]
 
     push(cleaned[:1].upper() + cleaned[1:])
+    stripped = strip_soft_modifiers(cleaned)
+    if stripped and stripped != cleaned:
+        push(stripped)
+        push(stripped[:1].upper() + stripped[1:])
 
     base_tokens = cleaned.split()
     for idx, token in enumerate(base_tokens):
@@ -149,6 +258,20 @@ def build_query_variants(query: str) -> list[str]:
         push(variant.replace(" 0,25", ",0.25"))
 
     for variant in list(variants):
+        stripped_variant = strip_soft_modifiers(variant)
+        if stripped_variant and stripped_variant != variant:
+            push(stripped_variant)
+            push(stripped_variant[:1].upper() + stripped_variant[1:])
+
+    for variant in list(variants):
+        tokens = variant.split()
+        for idx, token in enumerate(tokens):
+            for alt in token_fallbacks(token):
+                mutated = list(tokens)
+                mutated[idx] = alt
+                push(" ".join(mutated))
+
+    for variant in list(variants):
         if variant:
             push(variant[:1].upper() + variant[1:])
 
@@ -159,9 +282,14 @@ def build_query_variants(query: str) -> list[str]:
 def build_variant_tokens(query: str) -> list[list[str]]:
     variants = build_query_variants(query)
     token_groups: list[list[str]] = []
+    stop_tokens = {"в", "во", "и", "с", "со", "на", "по", "для", "из", "к", "у", "о", "об", "от", "до"}
     for variant in variants:
         prepared = normalize_search_text(variant).replace("mg", " ")
-        tokens = [token.strip() for token in prepared.split() if token.strip()]
+        tokens = [
+            token.strip()
+            for token in prepared.split()
+            if token.strip() and len(token.strip()) > 1 and token.strip() not in stop_tokens
+        ]
         if tokens and tokens not in token_groups:
             token_groups.append(tokens)
     return token_groups
