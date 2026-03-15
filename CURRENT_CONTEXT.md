@@ -58,7 +58,7 @@
 - [ ] PharmOrder: локальный index.html разошёлся с VPS (Codex deploy) — не синкать вслепую
 - [ ] PharmOrder: tg-pharma in `tools/tg-pharma/` — conversational Flash 3 bot, добить live Telegram smoke на `resolve_product` / `purchase_stats` / `set_inventory`, не запускать вместе с `tg-bridge` на том же token
 - [ ] Funding Scanner: сверка historical rates с оригиналом (PARADEX дельта до -51%)
-- [ ] Перегенерить TELEGRAM_BOT_TOKEN (засвечен в чате)
+- [ ] Перегенерить TELEGRAM_BOT_TOKEN (засвечен в чате) — @BotFather → Revoke → обновить .env
 
 ## Ссылки
 - Полная история: `DEV_CONTEXT.md`
