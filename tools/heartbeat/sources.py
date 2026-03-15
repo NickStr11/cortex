@@ -26,6 +26,7 @@ from config import (
     PH_FEED_URL,
     PH_RESULTS_LIMIT,
     REDDIT_RESULTS_LIMIT,
+    REDDIT_SEARCH_QUERIES,
     REDDIT_SUBREDDITS,
     X_RESULTS_LIMIT,
 )
@@ -85,38 +86,66 @@ class ProductHuntLaunch:
 
 @beartype
 def fetch_reddit_posts() -> list[RedditPost]:
-    subreddits = "+".join(REDDIT_SUBREDDITS)
-    url = f"https://www.reddit.com/r/{subreddits}/top.json?t=week&limit={REDDIT_RESULTS_LIMIT}"
+    def add_posts(payload: dict | list, fallback_subreddit: str) -> None:
+        if not isinstance(payload, dict):
+            return
+        children = payload.get("data", {}).get("children", [])
+        for child in children:
+            item = child.get("data", {})
+            if not item:
+                continue
 
-    try:
-        data = _http_get_json(url)
-    except Exception:
-        return []
+            title = item.get("title", "")
+            body = item.get("selftext", "") or ""
+            if not _matches_keywords(f"{title}\n{body}"):
+                continue
 
-    if not isinstance(data, dict):
-        return []
+            permalink = item.get("permalink", "")
+            post_url = f"https://reddit.com{permalink}"
+            if not permalink or post_url in seen_urls:
+                continue
+            seen_urls.add(post_url)
 
+            posts.append(RedditPost(
+                title=title,
+                url=post_url,
+                score=item.get("score", 0),
+                comments=item.get("num_comments", 0),
+                author=item.get("author", "unknown"),
+                subreddit=item.get("subreddit", fallback_subreddit),
+                created_at=datetime.fromtimestamp(
+                    item.get("created_utc", 0), tz=timezone.utc
+                ),
+            ))
+
+    seen_urls: set[str] = set()
     posts: list[RedditPost] = []
-    children = data.get("data", {}).get("children", [])
-
-    for child in children:
-        item = child.get("data", {})
-        if not item:
+    for subreddit in REDDIT_SUBREDDITS:
+        url = (
+            f"https://www.reddit.com/r/{subreddit}/top.json"
+            f"?t=week&limit={REDDIT_RESULTS_LIMIT}"
+        )
+        try:
+            data = _http_get_json(url)
+        except Exception:
             continue
 
-        posts.append(RedditPost(
-            title=item.get("title", ""),
-            url=f"https://reddit.com{item.get('permalink', '')}",
-            score=item.get("score", 0),
-            comments=item.get("num_comments", 0),
-            author=item.get("author", "unknown"),
-            subreddit=item.get("subreddit", "unknown"),
-            created_at=datetime.fromtimestamp(
-                item.get("created_utc", 0), tz=timezone.utc
-            ),
-        ))
+        add_posts(data, subreddit)
 
-    return posts
+    if len(posts) < 5:
+        for query in REDDIT_SEARCH_QUERIES:
+            search_url = (
+                "https://www.reddit.com/search.json"
+                f"?q={urllib.parse.quote(query)}&sort=top&t=week&limit={REDDIT_RESULTS_LIMIT}"
+            )
+            try:
+                data = _http_get_json(search_url)
+            except Exception:
+                continue
+            add_posts(data, "search")
+
+    posts.sort(key=lambda post: (post.score, post.comments), reverse=True)
+    return posts[:REDDIT_RESULTS_LIMIT]
 
 
 @beartype

@@ -29,13 +29,14 @@ def test_matches_keywords() -> None:
 
 @beartype
 @patch("sources._http_get_json")
+@patch("sources.REDDIT_SUBREDDITS", ["MachineLearning"])
 def test_fetch_reddit_posts(mock_get: MagicMock) -> None:
     mock_get.return_value = {
         "data": {
             "children": [
                 {
                     "data": {
-                        "title": "Test Post",
+                        "title": "AI agent workflow test",
                         "permalink": "/r/test/comments/123/",
                         "score": 100,
                         "num_comments": 10,
@@ -51,7 +52,7 @@ def test_fetch_reddit_posts(mock_get: MagicMock) -> None:
     posts = fetch_reddit_posts()
     assert len(posts) == 1
     assert isinstance(posts[0], RedditPost)
-    assert posts[0].title == "Test Post"
+    assert posts[0].title == "AI agent workflow test"
     assert posts[0].score == 100
     assert posts[0].subreddit == "MachineLearning"
 
@@ -122,6 +123,7 @@ def test_fetch_github_trending(mock_get: MagicMock) -> None:
 
 @beartype
 @patch("sources._http_get_json")
+@patch("sources.REDDIT_SUBREDDITS", ["MachineLearning"])
 def test_fetch_reddit_posts_error(mock_get: MagicMock) -> None:
     mock_get.side_effect = Exception("API error")
     posts = fetch_reddit_posts()

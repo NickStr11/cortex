@@ -46,8 +46,25 @@ GITHUB_RESULTS_LIMIT = 15
 
 # Reddit
 REDDIT_SUBREDDITS = [
-    "MachineLearning", "artificial", "LocalLLaMA", "ChatGPT",
-    "ClaudeAI", "singularity", "AutomateYourself",
+    "MachineLearning",
+    "artificial",
+    "LocalLLaMA",
+    "ChatGPT",
+    "ClaudeAI",
+    "OpenAI",
+    "singularity",
+    "LangChain",
+    "n8n",
+    "AutoGPT",
+    "Cursor",
+]
+REDDIT_SEARCH_QUERIES = [
+    "ai agent",
+    "ai automation",
+    "claude code",
+    "codex",
+    "llm workflow",
+    "agent engineering",
 ]
 REDDIT_RESULTS_LIMIT = 20
 
