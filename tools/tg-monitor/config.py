@@ -40,6 +40,17 @@ class GroupConfig:
 # Groups to monitor
 GROUPS: list[GroupConfig] = [
     GroupConfig(
+        name="FUNDthe",
+        identifier=-1002973322428,
+        min_length=20,
+        keywords=[
+            "funding", "spread", "basis", "carry", "arb", "arbitrage",
+            "long", "short", "btc", "eth", "bch", "sol", "xrp",
+            "hyperliquid", "paradex", "edgex", "extended", "pacifica",
+            "dex", "cex",
+        ],
+    ),
+    GroupConfig(
         name="AI Mindset (Серёжа Рис)",
         identifier=-1001497220445,
         min_length=40,
