@@ -1,5 +1,41 @@
 # Development Context Log
 
+## 2026-03-16 — Skill Forge + 4 новых скилла + видео-анализ
+
+### Что сделано
+
+**Skill Forge** — мета-скилл для генерации других скиллов:
+- `.claude/skills/skill-forge/SKILL.md` — 5-шаговый процесс: Parse Intent → Exa Research (3 параллельных поиска) → Distill → Generate SKILL.md → Confirm
+- Quality gates: 3+ code blocks, 3+ common issues, no placeholders
+- Концепция "Спецназ" из видео Founder OS #21: дать агенту контекст через Exa перед задачей
+
+**4 скилла сгенерированы параллельно через skill-forge паттерн:**
+- `.claude/skills/crewai-agents/SKILL.md` — 606 строк, 30 code blocks. Мульти-агент команды с ролями.
+- `.claude/skills/langgraph-agents/SKILL.md` — 596 строк, 23 code blocks. Граф-based воркфлоу с условными переходами.
+- `.claude/skills/autoresearch/SKILL.md` — автономные ML-эксперименты (Karpathy). 3-файловая архитектура.
+- `.claude/skills/gsd-method/SKILL.md` — 382 строки. Spec-driven разработка для Claude Code.
+
+**Видео-анализ (Founder OS #21)**:
+- YouTube `MAzH18vpVFM` — AI Mindset community, Саша Павляев + Александр (infra engineer)
+- Анализ через NotebookLM (yt-dlp заблокирован bot detection)
+- Темы: Skills + MCP "Спецназ", CloudMem (SQLite persistent memory), personal AI OS
+
+**Ресёрч GitHub AI трендов** (через Exa):
+- OpenClaw 210K+, OpenCode 122K, autoresearch 37K, DeerFlow 25K, Hive 9.5K
+- Фреймворки: CrewAI 44.6K, LangGraph 25K, Pydantic AI 15K
+- Методы: GSD, BMAD, Ralph Loop, Claude Flow/Ruflo
+
+**Claude-Mem исследование**:
+- 22K+ stars, thedotmack, TypeScript + SQLite + Bun
+- На Windows проблемы (Bun, пути, systemd). Текущий MEMORY.md достаточен.
+
+### Решения
+- Exa MCP подтверждён как основной инструмент семантического поиска (лучше WebSearch для AI/dev тем)
+- Claude-Mem — отложен, текущая memory система достаточна
+- NotebookLM — не MCP, а skill (`/notebooklm`), CLI `notebooklm-py` v0.3.3
+
+---
+
 ## 2026-03-12 - PharmOrder EAN override mechanism
 
 ### Проблема
@@ -53,17 +89,38 @@ UPDATE products SET id_name = 358502 WHERE ean = '4670033321227' AND supplier = 
 - Runtime now uses `BotRefsClient` for identity/alias resolution and keeps `bot_analytics.db` only as legacy fallback.
 
 ## Последнее обновление
-- Дата: 2026-03-12
-- PharmOrder VPS: EAN override механизм для кривых маппингов в sklit_cache.db. Живой пример зафиксирован и починен.
-- Аудит показал: 50 конфликтных EAN из 63K (0.1%) — в основном расходники/варианты, не лекарства. Системной эпидемии нет.
+- Дата: 2026-03-16
+- Сессия 33: репо cleanup + MCP расширение (Exa + NotebookLM)
+- Repo hygiene: merged chore/session-sync-mar12 (12 commits), удалены dead files (.claude/commands/daily.md, .claude/agents/verify-agent.md), создан root .env.example
+- Два новых MCP сервера: `exa` (семантический веб-поиск) и `notebooklm` (ноутбуки, подкасты, брифинги)
 
 ## Текущий статус
-- Этап: PharmOrder стабилен, EAN override работает. tg-pharma batch mode готов.
-- Последнее действие: сессия 32 — диагностика и фикс азитромицин Вертекс/ПУЛЬС не видного в PharmOrder; добавлен persistent override механизм на VPS.
-- Текущий фокус: **PharmOrder** (tg-pharma live smoke + Sozvezdie matrix_suppliers) + **TG Digest** (таймер на VM работает).
-- Следующий шаг: live smoke `@pharmorder_ops_bot` — проверить `ко-перинева` и dynamic periods в живом чате.
+- Этап: инфраструктура стабильна, MCP слой расширен
+- Последнее действие: сессия 33 — repo cleanup, .claude/ аудит, добавление Exa MCP + NotebookLM MCP
+- Текущий фокус: **MCP расширение** (Exa + NotebookLM подключены) + **PharmOrder** (стабилен на VPS) + **TG Digest** (таймер на VM)
+- Следующий шаг: рестарт Claude Code → проверить что Exa и NotebookLM MCP работают → попробовать web_search_exa на реальном запросе
 
 ## История изменений
+
+### 2026-03-16 — Repo cleanup + MCP expansion (сессия 33)
+- Что сделано:
+  - **Repo cleanup**: merged ветку chore/session-sync-mar12 в main (12 коммитов), fast-forward, pushed
+  - **Аудит .claude/**: удалены 2 мёртвых файла — `commands/daily.md` (hardcoded Obsidian path, не используется), `agents/verify-agent.md` (дублировал /verify команду)
+  - **Root .env.example**: создан шаблон со всеми env vars из всех tools (Gemini, Telegram, PharmOrder, Kwork, OpenRouter)
+  - **Exa MCP**: подключён как MCP сервер (семантический веб-поиск, `web_search_exa`, `deep_search_exa`, `get_code_context_exa`)
+  - **NotebookLM MCP**: подключён как MCP сервер (CLI уже был залогинен, добавлен `notebooklm mcp`)
+  - **Видео-анализ**: разобраны 2 видео AI Mindset — POS Sprint (Серёжа Рис) и Founder OS #21 (Александр Васильев, 37 агентов)
+  - **Сравнение Cortex vs nickCodex-READY**: Cortex = 23K LOC, 93 commits, 11 tools, level 4-5; nickCodex = 0 code, blueprint, level 3
+  - **Архитектурный разбор**: полное объяснение как работает .claude/ (hooks, commands, skills, agents, tools, memory)
+  - **Dashboard идея**: пользователь хочет визуальную сеть инфраструктуры (как у Васильева). Найдены AI Maestro и Agentlytics. Не выбрано.
+- Коммиты (в main через merge):
+  - `2da7c53` docs: update context files (sessions Mar 12-13)
+  - `5caab06` fix(heartbeat): update sources and config
+  - `a76a638` chore(tg-monitor): update config
+  - `6a64df5` feat(tg-pharma): batch mode, long voice, segment actions
+  - `09e36b5` docs: add token revoke instruction to CURRENT_CONTEXT
+  - `434c1bc` docs: add root .env.example with all project env vars
+  - `10b9730` chore: remove dead /daily command and duplicate verify-agent
 
 ### 2026-03-11 — tg-pharma MVP for PharmOrder inventory (сессия 30)
 - Что сделано:

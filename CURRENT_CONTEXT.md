@@ -1,5 +1,42 @@
 # Current Context
 
+## 2026-03-16 PharmOrder — страница заказов apteka.ru
+
+**Сделано** (задеплоено на VPS, не в git):
+
+### Backend (server.py)
+- `GET /api/orders?days=N` — читает Google Sheets (spreadsheet `11LfMaert...`) через gspread, кеширует клиент 30 мин
+- `POST /api/orders/sms` — отправляет SMS через smstext.app API + обновляет статус в Sheets (col 7 + col 10)
+- `GET /api/orders/product-image?q=...` — парсит apteka.ru (React SPA, `window.__INITIAL_STATE__`), достаёт `images.apteka.ru` URL, серверный кеш
+- `GET /orders` — отдельная тестовая страница (можно удалить)
+- Зависимости на VPS: `gspread`, `google-auth`, `httpx` — установлены в `/opt/pharmorder/.venv`
+- SMS ключ добавлен в `/opt/pharmorder/.env`
+
+### Frontend (index.html)
+- Заказы встроены в **центр основного сайта** (вместо "Выберите товар из списка")
+- Кнопка в сайдбаре (между "Остатки" и spacer) — по клику сворачивает все боковые панели, показывает заказы
+- Грид 3 карточки в ряд, фото 56x56 с apteka.ru
+- Каждая карточка: номер заказа, дата, источник (Email/Браузер/Telegram), товары с фото, телефон, кнопка SMS
+- Фильтр по периоду: сегодня / 2 дня / 3 дня / неделя
+- Fade-анимация: открыл панель → заказы исчезают, закрыл все → появляются
+- SMS кнопка → отправляет, помечает "Готово" в Sheets, карточка становится полупрозрачной
+
+### Файлы (локальные копии)
+- `C:\tmp\vps_pharmorder\src\server.py` — API (заказы с ~строки 1574)
+- `C:\tmp\vps_pharmorder\src\static\index.html` — фронт (~5100 строк)
+- `C:\tmp\vps_pharmorder\src\static\orders.html` — тестовая страница (можно удалить)
+
+### Что НЕ сделано / TODO
+- [ ] Фото не всегда находятся (apteka.ru SPA может не отдать данные без JS)
+- [ ] Нет поиска/фильтра по имени товара внутри заказов
+- [ ] Не тестировали SMS отправку live (только API готов)
+- [ ] orders.html тестовая страница — удалить после финала
+
+### Деплой
+Ручной через paramiko: редактируем локально → `sftp.put()` → `systemctl restart pharmorder`
+
+---
+
 ## 2026-03-13 PharmOrder inventory panel — СТАБИЛЕН
 
 **Сделано** (задеплоено на VPS, не в git):
@@ -47,18 +84,22 @@
 - Fallback order: local analytics SQLite -> VPS SSH history/catalog.
 
 ## Фокус
-- **PharmOrder** — production на VPS (194.87.140.204:8000). Созвездие matrix_suppliers пустая — жду доп. инфу для фикса синка.
+- **PharmOrder** — production на VPS (194.87.140.204:8000). Стабилен, не трогать.
 - **TG Digest** — NotebookLM deep research + raw TG chat, задеплоен на VM, timer 03:00 UTC
-- **Kwork Automation** — production pipeline (D:\code\2026\3\kwork). Полный цикл: discovery → filter → draft → auto-send → followup. Живые диалоги с клиентами.
-- **Funding Scanner** — отдельный репо (D:\code\2026\3\funding-scanner). Dashboard на VM (34.159.55.61:8080), 10 бирж, hourly cron. Historical rates расходятся на PARADEX/EXTENDED/HYPERLIQUID.
+- **Kwork Automation** — production pipeline (D:\code\2026\3\kwork). Полный цикл: discovery → filter → draft → auto-send → followup.
+- **Funding Scanner** — отдельный репо (D:\code\2026\3\funding-scanner). Dashboard на VM (34.159.55.61:8080).
+- **MCP Stack** — Context7 (docs), Codex CLI (websearch/code), Exa (semantic search), Playwright (browser), Sequential Thinking, Context Mode
+- **Skills** — skill-forge (мета), crewai-agents, langgraph-agents, autoresearch, gsd-method, notebooklm, video, и др.
 
 ## Ближайшие шаги
-- [ ] PharmOrder: скрин СКЛИТ с матрицей Созвездия → supplier-level matrix badges
-- [ ] PharmOrder: заполнить matrix_suppliers из product_post.dbf в sync_standalone.py
-- [ ] PharmOrder: локальный index.html разошёлся с VPS (Codex deploy) — не синкать вслепую
-- [ ] PharmOrder: tg-pharma in `tools/tg-pharma/` — conversational Flash 3 bot, добить live Telegram smoke на `resolve_product` / `purchase_stats` / `set_inventory`, не запускать вместе с `tg-bridge` на том же token
-- [ ] Funding Scanner: сверка historical rates с оригиналом (PARADEX дельта до -51%)
-- [ ] Перегенерить TELEGRAM_BOT_TOKEN (засвечен в чате) — @BotFather → Revoke → обновить .env
+- [x] Рестарт Claude Code → проверить Exa MCP + NotebookLM MCP работают
+- [x] Skill Forge — мета-скилл для генерации скиллов через Exa
+- [x] 4 новых скилла: crewai-agents, langgraph-agents, autoresearch, gsd-method
+- [ ] Dashboard/визуализация инфраструктуры (AI Maestro / Agentlytics / custom) — идея не реализована
+- [ ] PharmOrder: tg-pharma live smoke на `resolve_product` / `purchase_stats` / `set_inventory`
+- [ ] Funding Scanner: сверка historical rates с оригиналом
+- [ ] Перегенерить TELEGRAM_BOT_TOKEN (засвечен в чате)
+- [ ] Обновить Claude Code через `winget upgrade Anthropic.ClaudeCode` (закрыть Claude перед этим)
 
 ## Ссылки
 - Полная история: `DEV_CONTEXT.md`
