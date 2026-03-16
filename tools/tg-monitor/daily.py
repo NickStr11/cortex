@@ -1394,18 +1394,21 @@ def main() -> None:
         tg_raw_chat = _collect_raw_chat(args.hours)
         tg_digest_text = run_tg_digest(args.dry_run, args.hours)
 
-    # Phase 3: Deep research via NotebookLM (or fallback to Gemini)
+    # Phase 3: Assemble digest — heartbeat always first, then NLM or TG digest
     parts: list[str] = []
     used_nlm = False
 
-    # Prefer raw chat for NotebookLM (живее), fallback digest for Gemini
+    # Heartbeat with personal filter — ALWAYS included as quick links section
+    if raw_heartbeat:
+        parts.append(format_heartbeat_for_daily(raw_heartbeat, date_label))
+
+    # Deep research via NotebookLM (combines HN + Reddit + TG into cohesive analysis)
     nlm_tg_source = tg_raw_chat or tg_digest_text
     if not args.no_nlm and (hn_links or reddit_links or nlm_tg_source):
         print("\n[4/4] NotebookLM deep research...")
         deep = notebooklm_deep_research(hn_links, reddit_links, nlm_tg_source, date_label)
         if deep:
             parts.append(f"# AI Intelligence Briefing — {date_label}\n\n{deep}")
-            # Append source links
             link_lines: list[str] = []
             for title, url, *_ in hn_links[:10]:
                 link_lines.append(f"- [{title}]({url})")
@@ -1417,14 +1420,9 @@ def main() -> None:
                 parts.append("## Источники\n" + "\n".join(link_lines))
             used_nlm = True
 
-    # Fallback: old Gemini approach
-    if not used_nlm:
-        if not args.no_nlm:
-            print("  NotebookLM unavailable, falling back to Gemini summaries")
-        if raw_heartbeat:
-            parts.append(format_heartbeat_for_daily(raw_heartbeat, date_label))
-        if tg_digest_text:
-            parts.append(tg_digest_text)
+    # TG digest as fallback when NLM unavailable, or always append raw group digests
+    if not used_nlm and tg_digest_text:
+        parts.append(tg_digest_text)
 
     if not parts:
         print("\nNothing to report today.")
