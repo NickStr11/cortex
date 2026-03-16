@@ -105,6 +105,38 @@ LIFEHACK_SIGNAL_KEYWORDS = (
     "interactive",
 )
 
+# Personal relevance filter — score signals against our actual interests
+# Update this list to match current focus areas
+PERSONAL_INTEREST_KEYWORDS = (
+    # Core stack
+    "claude", "claude code", "anthropic", "opus", "sonnet", "haiku",
+    "codex", "openai", "gpt-5", "gpt-4", "chatgpt",
+    "gemini", "google ai",
+    # Agent infra
+    "agent", "mcp", "tool use", "function calling", "multi-agent",
+    "agentic", "orchestration", "workflow", "automation",
+    "langgraph", "crewai", "pydantic ai",
+    # Dev tools
+    "cursor", "windsurf", "openclaw", "cline",
+    "vibe coding", "vibe-coding", "vibecoding",
+    # Specific interests
+    "telegram bot", "obsidian", "knowledge base",
+    "funding rate", "arbitrage", "defi",
+    "pharmacy", "healthcare",
+    # Meta
+    "personal os", "ai os", "memory", "context window",
+    "eval", "benchmark", "leaderboard",
+    "open source", "self-hosted",
+)
+
+# Blocklist — spam/gaming/irrelevant noise that matches keywords by accident
+PERSONAL_BLOCKLIST = (
+    "roblox", "autoclick", "auto-click", "auto click",
+    "fortnite", "minecraft", "pokemon", "game cheat",
+    "trump", "maga", "political",
+    "nft art", "pixel art generator",
+)
+
 
 @dataclass(frozen=True)
 class HeartbeatSignal:
@@ -376,6 +408,36 @@ def build_heartbeat_signals(raw_heartbeat: str) -> list[HeartbeatSignal]:
 
 
 @beartype
+def _is_blocklisted(signal: HeartbeatSignal) -> bool:
+    """Check if signal matches the spam/noise blocklist."""
+    text = f"{signal.title}\n{signal.description}".lower()
+    return any(word in text for word in PERSONAL_BLOCKLIST)
+
+
+@beartype
+def _personal_relevance_score(signal: HeartbeatSignal) -> float:
+    """Score a signal by personal relevance. 0 = irrelevant, higher = more relevant."""
+    if _is_blocklisted(signal):
+        return -1.0
+    text = f"{signal.title}\n{signal.description}".lower()
+    score = 0.0
+    for keyword in PERSONAL_INTEREST_KEYWORDS:
+        if keyword in text:
+            score += 1.0
+    return score
+
+
+@beartype
+def _filter_relevant_signals(signals: list[HeartbeatSignal], min_score: float = 0.5) -> list[HeartbeatSignal]:
+    """Filter signals by personal relevance, keeping only those that match interests."""
+    relevant = [(s, _personal_relevance_score(s)) for s in signals]
+    # Keep signals with relevance score >= min_score, sorted by (relevance, rank)
+    filtered = [(s, rel) for s, rel in relevant if rel >= min_score]
+    filtered.sort(key=lambda x: (x[1], x[0].rank), reverse=True)
+    return [s for s, _ in filtered]
+
+
+@beartype
 def _signal_text(signal: HeartbeatSignal) -> str:
     return f"{signal.title}\n{signal.description}".lower()
 
@@ -526,7 +588,7 @@ def summarize_signal_section_ru(
     prompt = f"""Ниже отобранные сигналы по теме: {focus}.
 
 Для КАЖДОЙ ссылки дай короткий комментарий на русском:
-- 1 строка на ссылку
+- 2-3 предложения на ссылку: что это такое, зачем нужно, почему интересно
 - не меняй порядок ссылок
 - не выдумывай факты, которых нет в title, description, source и stats
 - сохраняй оригинальный title на английском
@@ -536,8 +598,8 @@ def summarize_signal_section_ru(
 
 Формат строго такой:
 ### {header}
-1. [Original Title](url) — Source stats: короткий русский комментарий
-2. [Original Title](url) — Source stats: короткий русский комментарий
+1. [Original Title](url) — Source stats: Что это и зачем. Подробнее про суть. Почему это может быть полезно.
+2. [Original Title](url) — Source stats: Что это и зачем. Подробнее про суть. Почему это может быть полезно.
 """
 
     payload_lines: list[str] = []
@@ -823,6 +885,7 @@ def fetch_reddit_ai_radar() -> str | None:
 - приоритет: практические кейсы, новые инструменты, лайфхаки, workflows, разборы
 - не выдумывай посты, сабреддиты и score
 - сохраняй оригинальный title на английском
+- ОБЯЗАТЕЛЬНО включай прямую ссылку на пост Reddit (reddit.com/r/...), НЕ redirect URL
 
 Формат:
 ### Reddit Радар
@@ -861,14 +924,21 @@ def format_heartbeat_for_daily(raw_heartbeat: str, date_label: str) -> str:
 
     try:
         signals = build_heartbeat_signals(raw_heartbeat)
+
+        # Personal relevance filter — drop noise like Roblox clickers
+        signals = _filter_relevant_signals(signals, min_score=0.5)
+        if not signals:
+            print("  No personally relevant heartbeat signals after filtering")
+            return f"*Heartbeat — {date_label}*\n\nНичего релевантного сегодня."
+
         used_urls: set[str] = set()
 
-        trend_signals = _pick_signals(signals, limit=5, exclude_urls=used_urls, max_per_source=2)
+        trend_signals = _pick_signals(signals, limit=4, exclude_urls=used_urls, max_per_source=2)
         used_urls.update(signal.url for signal in trend_signals)
 
         automation_signals = _pick_signals(
             signals,
-            limit=5,
+            limit=3,
             exclude_urls=used_urls,
             matcher=_is_automation_signal,
             max_per_source=2,
@@ -877,7 +947,7 @@ def format_heartbeat_for_daily(raw_heartbeat: str, date_label: str) -> str:
 
         lifehack_signals = _pick_signals(
             signals,
-            limit=5,
+            limit=3,
             exclude_urls=used_urls,
             matcher=_is_lifehack_signal,
             max_per_source=2,
