@@ -19,6 +19,24 @@
       "type": "stdio",
       "command": "uvx",
       "args": ["idea-reality-mcp"]
+    },
+    "codex-cli": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "codex-cli-mcp@latest"]
+    },
+    "exa": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "exa-mcp-server@latest"],
+      "env": {
+        "EXA_API_KEY": "${EXA_API_KEY}"
+      }
+    },
+    "context-mode": {
+      "type": "stdio",
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "context-mode"]
     }
   }
 }
