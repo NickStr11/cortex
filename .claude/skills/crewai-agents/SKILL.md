@@ -1,6 +1,6 @@
 ---
 name: crewai-agents
-description: "Build multi-agent teams with CrewAI. Quick setup, role-based agents, task delegation."
+description: "Build multi-agent teams with CrewAI. Quick setup, role-based agents, task delegation. Use when the user wants to create a pipeline with multiple stages (research → write → edit), automate a multi-step workflow, build an agent team, or asks about CrewAI, multi-agent systems, agent orchestration, or role-based AI pipelines."
 ---
 
 # CrewAI Multi-Agent Teams

@@ -64,18 +64,33 @@
 
 Маркируй выводы: `confirmed issue` / `design preference` / `hypothesis`.
 
-## 1. Context & Memory
+## 1. Quick Start
+
+```bash
+# Python tools — у каждого свой .venv
+cd tools/<tool> && uv sync && uv run python main.py
+
+# Проверки
+bash scripts/ops.sh test      # тесты
+bash scripts/ops.sh check     # pyright
+bash scripts/ops.sh lint      # ruff
+bash scripts/ops.sh secrets   # секреты в tracked files
+```
+
+Cortex = personal AI monorepo. `.claude/` — платформа (commands, skills, hooks, agents). `tools/` — продукты (каждый самодостаточный). Подробнее: `PROJECT_CONTEXT.md`.
+
+## 2. Context & Memory
 
 - Длинный контекст → предложи `/handoff` и новый чат.
 
-## 2. Technical Rules
+## 3. Technical Rules
 
 - Плоская структура, минимум зависимостей. Код объясняет себя сам.
 - **700 строк** макс на файл, **70 строк** на функцию, **4 уровня** вложенности.
 - Перед использованием новых библиотек — Web Search. Не полагайся на знания модели.
 - При ошибке — сначала причина, затем конкретный фикс.
 
-## 3. Workflow
+## 4. Workflow
 
 - Перед значительными изменениями — план. Большие задачи → мелкие шаги.
 - Git: коммить ТОЛЬКО по запросу (`/quick-commit`, "закоммить") или при `/handoff`. Не коммить в main напрямую.
@@ -91,7 +106,7 @@
 - **Codex CLI MCP** (`reasoningEffort: xhigh`): ресёрч, второе мнение, веб-поиск. Использовать активно.
 - Полный playbook: `memory/subagents-playbook.md`
 
-## 4. Mandatory Actions
+## 5. Mandatory Actions
 
 | Момент | Действие |
 |--------|----------|
@@ -100,12 +115,12 @@
 | **Перед PR** | `/verify` |
 | **Финиш сессии** | `/handoff` |
 
-## 5. Communication
+## 6. Communication
 
 - Русский по умолчанию. Без воды. Прямо и по существу.
 - Ошибки: причина + фикс, без оценочных суждений.
 
-## 6. Stack Defaults
+## 7. Stack Defaults
 
 > Конкретный стек — в PROJECT_CONTEXT.md
 
@@ -115,12 +130,12 @@
 - **PM**: `uv` (Python), `npm` (Node.js)
 - Python: `docs/python-rules.md`
 
-## 7. Security
+## 8. Security
 
 - API-ключи → `.env` + `.gitignore`. Хуки блокируют автоматически.
 - Ошибки → "Известные проблемы" в DEV_CONTEXT.md.
 
-## 8. Reference
+## 9. Reference
 
 > Не грузятся автоматически — читать по запросу когда нужны.
 

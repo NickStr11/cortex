@@ -1,6 +1,6 @@
 ---
 name: gsd-method
-description: "GSD (Get Shit Done) — meta-prompting and spec-driven development method for Claude Code. Maximum output, minimal overhead. Solves context rot."
+description: "GSD (Get Shit Done) — meta-prompting and spec-driven development method for Claude Code. Maximum output, minimal overhead. Solves context rot. Use when starting a large feature, multi-step implementation, or complex task that benefits from a spec-first approach. Also triggers on: 'напиши спеку', 'разбей на задачи', 'spec-driven', 'большая фича', or when the user wants structured task breakdown before coding."
 ---
 
 # GSD -- Get Shit Done
