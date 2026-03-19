@@ -18,6 +18,6 @@
 - [ ] Funding Scanner: сверка historical rates
 
 ## Ссылки
-- Полная история: `DEV_CONTEXT.md`
+- Старые записи: `archive/dev-context-*.md`
 - Funding арбитраж: `memory/funding-arb.md`
 - Субагент playbook: `memory/subagents-playbook.md`
