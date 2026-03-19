@@ -7,10 +7,7 @@ description: Toolkit for interacting with and testing local web applications usi
 
 To test local web applications, write native Python Playwright scripts.
 
-**Helper Scripts Available**:
-- `scripts/with_server.py` - Manages server lifecycle (supports multiple servers)
-
-**Always run scripts with `--help` first** to see usage. DO NOT read the source until you try running the script first and find that a customized solution is absolutely necessary. These scripts can be very large and thus pollute your context window. They exist to be called directly as black-box scripts rather than ingested into your context window.
+Write native Python Playwright scripts for testing. Start servers manually or via shell commands before running tests.
 
 ## Decision Tree: Choosing Your Approach
 
@@ -21,8 +18,7 @@ User task -> Is it static HTML?
     |         +-- Fails/Incomplete -> Treat as dynamic (below)
     |
     +-- No (dynamic webapp) -> Is the server already running?
-        |-- No -> Run: python scripts/with_server.py --help
-        |        Then use the helper + write simplified Playwright script
+        |-- No -> Start the server manually, then write Playwright script
         |
         +-- Yes -> Reconnaissance-then-action:
             1. Navigate and wait for networkidle
@@ -31,24 +27,9 @@ User task -> Is it static HTML?
             4. Execute actions with discovered selectors
 ```
 
-## Example: Using with_server.py
+## Example: Testing a local app
 
-To start a server, run `--help` first, then use the helper:
-
-**Single server:**
-```bash
-python scripts/with_server.py --server "npm run dev" --port 5173 -- python your_automation.py
-```
-
-**Multiple servers (e.g., backend + frontend):**
-```bash
-python scripts/with_server.py \
-  --server "cd backend && python server.py" --port 3000 \
-  --server "cd frontend && npm run dev" --port 5173 \
-  -- python your_automation.py
-```
-
-To create an automation script, include only Playwright logic (servers are managed automatically):
+Start the server in background, then run Playwright:
 ```python
 from playwright.sync_api import sync_playwright
 
@@ -81,7 +62,6 @@ with sync_playwright() as p:
 
 ## Best Practices
 
-- **Use bundled scripts as black boxes** - consider whether one of the scripts available in `scripts/` can help
 - Use `sync_playwright()` for synchronous scripts
 - Always close the browser when done
 - Use descriptive selectors: `text=`, `role=`, CSS selectors, or IDs

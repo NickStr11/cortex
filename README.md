@@ -48,14 +48,11 @@ claude
 
 ## Claude Code Infrastructure
 
-### Skills (15)
+### Skills (14 custom + Superpowers plugin)
 | Skill | Назначение |
 |-------|------------|
 | `skill-forge` | Мета-скилл: генерация скиллов через Exa research |
 | `frontend-design` | Production-grade UI с дизайн-системой |
-| `systematic-debugging` | 4-фазный root cause analysis |
-| `subagent-dev` | Fresh subagent per task + двойной review |
-| `parallel-agents` | Dispatch агентов по доменам параллельно |
 | `gsd-method` | Spec-driven разработка (Get Shit Done) |
 | `autoresearch` | Автономные ML-эксперименты (a la Karpathy) |
 | `crewai-agents` | Мульти-агент команды с ролями |
@@ -65,7 +62,9 @@ claude
 | `eval` | Post-session self-evaluation |
 | `banana` | Генерация изображений через Gemini |
 | `video` | Анализ видео (URL или локальный файл) |
-| `skill-creator` | Генерация скиллов (legacy) |
+| `docx` | Создание/редактирование Word документов |
+| `xlsx` | Работа с Excel файлами |
+| `pdf` | Работа с PDF файлами |
 
 ### Commands (14)
 `/council` `/dispatch` `/verify` `/handoff` `/quick-commit` `/status` `/heartbeat` `/build-fix` `/tdd` `/learn` `/metrics` `/new-project` `/screenshot` `/tg-digest`
@@ -87,7 +86,7 @@ cortex/
   .claude/
     commands/      — 14 slash commands
     agents/        — 3 agent specs
-    skills/        — 15 skills
+    skills/        — 14 skills
     hooks/         — 8 hooks
     settings.json  — project hooks config
   .github/         — Actions (heartbeat cron, auto-review, jules trigger)
@@ -98,7 +97,6 @@ cortex/
   PROJECT_CONTEXT  — стек и архитектура
   CURRENT_CONTEXT  — активный фокус
   DEV_CONTEXT      — append-only история решений
-  AGENTS.md        — справочник инфраструктуры
 ```
 
 ## Stack

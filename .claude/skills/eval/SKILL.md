@@ -1,3 +1,8 @@
+---
+name: eval
+description: "Eval — Post-Session Self-Evaluation. Запускается в конце сессии или по запросу /eval."
+---
+
 # Eval — Post-Session Self-Evaluation
 
 Запускается в конце сессии (перед /handoff) или по запросу `/eval`.

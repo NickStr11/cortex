@@ -17,8 +17,6 @@
 | `PROJECT_CONTEXT.md` | Что за система, стек, структура | При старте |
 | `CURRENT_CONTEXT.md` | Что активно прямо сейчас, следующий шаг | При старте |
 | `DEV_CONTEXT.md` | Append-only история решений и handoff | По запросу / при handoff |
-| `AGENTS.md` | Справочник инфраструктуры (команды, хуки, скиллы) | По запросу |
-
 Это **разные функции**, не дублирование. Поднимать вопрос только если два файла реально описывают одно и то же.
 
 ### Instruction precedence
@@ -32,7 +30,7 @@
 ### Context loading
 
 - **При старте**: `CLAUDE.md` (auto) + `CURRENT_CONTEXT.md` + `PROJECT_CONTEXT.md`
-- **По запросу**: `DEV_CONTEXT.md`, `AGENTS.md`, `memory/`, `knowledge/`
+- **По запросу**: `DEV_CONTEXT.md`, `memory/`, `knowledge/`
 - **Не грузить** без необходимости: `DEV_CONTEXT.md` целиком (тяжёлый), файлы в `research/`
 
 ### Where new information goes
@@ -83,7 +81,7 @@
 - Git: коммить ТОЛЬКО по запросу (`/quick-commit`, "закоммить") или при `/handoff`. Не коммить в main напрямую.
 - Не запускай `npm run dev` / `python -m ...` автоматически.
 - Quality Gates: Build → Types → Lint → Tests (80%+) → Security → Diff.
-- Conventional Commits: `<type>(<scope>): <description>`. Детали: @docs/git-flow.md
+- Conventional Commits: `<type>(<scope>): <description>`. Детали: `docs/git-flow.md`
 
 ### Делегирование — субагенты и Codex
 - **Не делай сам то что можно делегировать.** Подписки оплачены — выжимай максимум.
@@ -91,7 +89,7 @@
 - Независимые задачи → параллельные Task-ы в одном сообщении.
 - Проверки/аудит → `run_in_background`, не блокируй основную работу.
 - **Codex CLI MCP** (`reasoningEffort: xhigh`): ресёрч, второе мнение, веб-поиск. Использовать активно.
-- Полный playbook: @memory/subagents-playbook.md
+- Полный playbook: `memory/subagents-playbook.md`
 
 ## 4. Mandatory Actions
 
@@ -115,7 +113,7 @@
 - **Backend**: Python (3.12+) / Node.js (20+)
 - **DB**: PostgreSQL (Supabase) / SQLite (локально)
 - **PM**: `uv` (Python), `npm` (Node.js)
-- Python: @docs/python-rules.md
+- Python: `docs/python-rules.md`
 
 ## 7. Security
 
@@ -124,8 +122,10 @@
 
 ## 8. Reference
 
-- @docs/verify.md — verification workflow
-- @docs/git-flow.md — git conventions
-- @docs/python-rules.md — Python rules
-- @docs/deploy-vps.md — VPS deployment
-- @tools/ui-ux/GUIDE.md — UI/UX design system
+> Не грузятся автоматически — читать по запросу когда нужны.
+
+- `docs/verify.md` — verification workflow
+- `docs/git-flow.md` — git conventions
+- `docs/python-rules.md` — Python rules
+- `docs/deploy-vps.md` — VPS deployment
+- `tools/ui-ux/GUIDE.md` — UI/UX design system

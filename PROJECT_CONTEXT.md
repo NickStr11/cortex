@@ -21,7 +21,7 @@
 ## Два слоя
 
 ### Meta-layer (переносимый)
-- `.claude/` — 14 commands, 4 agents, 7 skills, 8 hooks
+- `.claude/` — commands, agents, skills, hooks (актуальный список в README)
 - `.github/workflows/` — 4 автоматизации
 - `docs/` — python-rules, git-flow, verify, deploy-vps
 - Переносим между проектами через dotfiles-claude
@@ -34,6 +34,7 @@
 - `tools/tg-bridge` — Telegram → Claude Code bridge
 - `tools/pipeline` — content pipeline (Gemini → Telegram)
 - `tools/metrics` — трекинг эффективности AI-агентов
+- `tools/tg-pharma` — AI-бот для аптечных операций (остатки, история, заказы)
 - `tools/ui-ux`, `tools/scaffold`, `tools/data-prep`, `tools/video` — утилиты
 
 ## Смежный проект

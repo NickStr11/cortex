@@ -26,7 +26,7 @@ jobs:
 
             ### Project Rules to Enforce:
 
-            1. **General Structure (CLAUDE.md & AGENTS.md):**
+            1. **General Structure (CLAUDE.md):**
                - Maximum 700 lines per file.
                - Maximum 70 lines per function.
                - Maximum 4 levels of nesting.

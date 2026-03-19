@@ -1,4 +1,5 @@
 {
+  "disabledMcpjsonServers": ["sequential-thinking", "playwright"],
   "hooks": {
     "PreToolUse": [
       {
@@ -22,20 +23,6 @@
           {
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-main.py\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/mcp-usage-tracker.py\"",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/expensive-tool-warning.py\"",
             "timeout": 5
           }
         ]
