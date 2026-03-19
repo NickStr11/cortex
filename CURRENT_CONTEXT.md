@@ -8,8 +8,10 @@
 - **MCP Stack** — Context7 (docs), Codex CLI (websearch/code), Exa (semantic search), Context Mode, Generative-UI (charts/diagrams)
 - **Skills** — 14 custom + Superpowers v5.0.5 plugin (14) = 28 total
 - **OpenClaw** — второй ноут (nsv11), @cipherV2bot, openai-codex/gpt-5.4, Telegram DM-only
+- **Diary система** — внедрена (сессия 001). PreCompact hook + /diary + /reflect
 
 ## Ближайшие шаги
+- [ ] **Обкатать diary/reflect** на живых сессиях, проверить PreCompact hook
 - [ ] **Обкатать superpowers workflow** на живой задаче (brainstorm → plan → execute)
 - [ ] **OpenClaw WSL2 миграция** — когда native Windows gateway начнёт сыпаться
 - [ ] **Ротация Telegram tokens** — @cipher_think_bot (cortex) + @cipherV2bot (OpenClaw)
