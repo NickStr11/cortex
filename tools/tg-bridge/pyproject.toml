@@ -7,3 +7,9 @@ dependencies = [
     "httpx>=0.27",
     "beartype>=0.19",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9",
+    "pyright>=1.1",
+]

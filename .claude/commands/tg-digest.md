@@ -1,5 +1,15 @@
 Глубокий дайджест Telegram-группы через Gemini. $ARGUMENTS — ссылка на группу или username.
 
+## Prerequisites
+
+Проверь наличие ключей перед запуском:
+```bash
+grep -q "TG_API_ID" D:/code/2026/2/cortex/.env && echo "OK: TG_API_ID" || echo "MISSING: TG_API_ID — нужен для Telethon"
+grep -q "TG_API_HASH" D:/code/2026/2/cortex/.env && echo "OK: TG_API_HASH" || echo "MISSING: TG_API_HASH — нужен для Telethon"
+grep -q "GOOGLE_API_KEY" D:/code/2026/2/cortex/.env && echo "OK: GOOGLE_API_KEY" || echo "MISSING: GOOGLE_API_KEY — нужен для Gemini"
+```
+Если любой ключ отсутствует — сообщи и останови.
+
 ## Инструкции
 
 1. Загрузи env из `D:/code/2026/2/cortex/.env` (через dotenv или export)

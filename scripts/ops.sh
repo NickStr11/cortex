@@ -2,9 +2,9 @@
 # Cortex — root operations (works in Git Bash on Windows)
 set -e
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TOOLS_WITH_TESTS="tools/heartbeat tools/metrics"
-TOOLS_ALL="tools/heartbeat tools/metrics tools/funding-scanner tools/kwork-monitor tools/tg-monitor tools/tg-bridge tools/pipeline tools/scaffold"
+TOOLS_ALL="tools/heartbeat tools/metrics tools/kwork-monitor tools/tg-monitor tools/tg-bridge tools/tg-pharma tools/pipeline tools/scaffold"
 
 case "${1:-help}" in
   test)

@@ -1,12 +1,27 @@
 Запусти полную проверку качества кода по docs/verify.md.
 
-Последовательно выполни все шаги:
-1. Build Check
-2. Type Check
-3. Lint Check
-4. Test Suite (с coverage)
-5. Security Scan (debug statements + secrets)
-6. Diff Review
+## Шаги
 
-В конце выведи VERIFICATION REPORT в формате из docs/verify.md.
-Если на каком-то шаге ошибка — останови и предложи фикс.
+1. **Tests**: `bash scripts/ops.sh test`
+2. **Lint**: `bash scripts/ops.sh lint`
+3. **Types**: `bash scripts/ops.sh check`
+4. **Secrets**: `bash scripts/ops.sh secrets`
+5. **Diff**: `git diff --stat`
+
+Каждый шаг — запусти команду, собери результат.
+Если тесты падают — СТОП, предложи фикс.
+Lint/types warnings допустимы, errors — нет.
+
+В конце выведи:
+
+```
+VERIFICATION REPORT
+===================
+Tests:     [PASS/FAIL] (X passed)
+Lint:      [PASS/FAIL] (X issues)
+Types:     [PASS/FAIL] (X errors)
+Secrets:   [PASS/FAIL]
+Diff:      [X files changed]
+
+Overall:   [READY/NOT READY]
+```

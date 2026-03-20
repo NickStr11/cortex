@@ -17,6 +17,6 @@ if exist "%ROOT%\tools\tg-bridge\main.py" (
   echo.
 )
 
-claude "Session start. Read CURRENT_CONTEXT.md and PROJECT_CONTEXT.md first. Open DEV_CONTEXT.md only if needed. Then give a brief status, active track, and next step."
+claude "Session start. Read CURRENT_CONTEXT.md. Brief status, active track, and next step."
 
 endlocal

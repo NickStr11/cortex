@@ -1,107 +1,53 @@
 # Verification Workflow
 
-Комплексная проверка качества кода.
+Комплексная проверка качества кода перед коммитом/PR.
 
-## When to Use
+## Quick Run
 
-- После завершения фичи
-- Перед PR
-- После рефакторинга
+```bash
+bash scripts/ops.sh test      # тесты (heartbeat, metrics)
+bash scripts/ops.sh lint      # ruff lint все tools
+bash scripts/ops.sh check     # pyright typecheck
+bash scripts/ops.sh secrets   # секреты в tracked files
+```
 
 ## Steps
 
-1. **Build Check**: Run project build command
-   ```bash
-   npm run build 2>&1 | tail -20
-   ```
+1. **Tests**: `bash scripts/ops.sh test`
+   - Если тесты падают — СТОП, чинить.
 
-   If build fails, STOP and fix errors.
+2. **Lint**: `bash scripts/ops.sh lint`
+   - ruff check по всем активным tools
+   - Автофикс: `uv run ruff check --fix .` внутри конкретного tool
 
-2. **Type Check**: Verify type safety
+3. **Types**: `bash scripts/ops.sh check`
+   - pyright strict по всем tools
+   - Допустимо: warnings. Недопустимо: errors.
 
-   **TypeScript**:
-   ```bash
-   npx tsc --noEmit 2>&1 | head -30
-   ```
+4. **Secrets**: `bash scripts/ops.sh secrets`
+   - Проверка на утечки API-ключей в tracked files
+   - Должно быть "Clean."
 
-   **Python**:
-   ```bash
-   pyright . 2>&1 | head -30
-   ```
-
-3. **Lint Check**: Check code style
-
-   **JavaScript/TypeScript**:
-   ```bash
-   npm run lint 2>&1 | head -30
-   ```
-
-   **Python**:
-   ```bash
-   ruff check . 2>&1 | head -30
-   ```
-
-4. **Test Suite**: Run tests with coverage
-
-   **JavaScript/TypeScript**:
-   ```bash
-   npm run test -- --coverage 2>&1 | tail -50
-   ```
-
-   **Python**:
-   ```bash
-   pytest --cov=. --cov-report=term 2>&1 | tail -50
-   ```
-
-   Target: 80% minimum coverage
-
-5. **Security Scan**: Check for common issues
-
-   **Check for debug statements**:
-   ```bash
-   # JavaScript/TypeScript
-   grep -rn "console.log" --include="*.ts" --include="*.tsx" src/ 2>/dev/null | head -10
-
-   # Python
-   grep -rn "print(" --include="*.py" . 2>/dev/null | head -10
-   ```
-
-   **Check for secrets**:
-   ```bash
-   grep -rn "sk-" --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | head -10
-   grep -rn "api_key" --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | head -10
-   ```
-
-6. **Diff Review**: Show what changed
-   ```bash
-   git diff --stat
-   git diff HEAD~1 --name-only
-   ```
+5. **Diff Review**: `git diff --stat`
+   - Глазами проверить что изменилось
 
 ## Output
 
-After running all phases, produce a verification report:
-
 ```
 VERIFICATION REPORT
-==================
-
-Build:     [PASS/FAIL]
+===================
+Tests:     [PASS/FAIL] (X passed)
+Lint:      [PASS/FAIL] (X issues)
 Types:     [PASS/FAIL] (X errors)
-Lint:      [PASS/FAIL] (X warnings)
-Tests:     [PASS/FAIL] (X/Y passed, Z% coverage)
-Security:  [PASS/FAIL] (X issues)
+Secrets:   [PASS/FAIL]
 Diff:      [X files changed]
 
-Overall:   [READY/NOT READY] for PR
-
-Issues to Fix:
-1. ...
-2. ...
+Overall:   [READY/NOT READY]
 ```
 
-## Notes
+## When to Use
 
-- Fix issues as they appear before moving to next phase
-- Target 80% test coverage minimum
-- Remove all debug statements before committing
+- `/verify` — запускает этот workflow
+- Перед PR
+- После рефакторинга
+- При `/handoff` если были значимые изменения кода
