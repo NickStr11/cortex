@@ -1,5 +1,5 @@
 {
-  "disabledMcpjsonServers": ["sequential-thinking", "playwright"],
+  "disabledMcpjsonServers": ["sequential-thinking"],
   "hooks": {
     "PreToolUse": [
       {
@@ -45,7 +45,7 @@
           {
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-compact.py\"",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
