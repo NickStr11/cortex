@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -36,6 +37,23 @@ from beartype import beartype
 
 ROOT = Path(__file__).parent.parent.parent
 HEARTBEAT_DIR = ROOT / "tools" / "heartbeat"
+RUNTIME_INSPECT_DIR = ROOT / "runtime" / "tg-monitor-inspect"
+ROLLING_LEADERBOARD_STATE_PATH = RUNTIME_INSPECT_DIR / "rolling_7d_leaderboards.json"
+WEEKLY_LEADERBOARD_LIMIT = 10
+HN_WEEKLY_QUERY_LIMIT = 30
+HN_ALGOLIA_SEARCH_API = "https://hn.algolia.com/api/v1/search_by_date"
+HN_WEEKLY_QUERIES = (
+    "claude code",
+    "codex",
+    "ai agent",
+    "ai automation",
+    "llm workflow",
+    "anthropic",
+    "openai",
+    "gemini",
+    "mcp",
+    "cursor",
+)
 TG_MONITOR_DIR = Path(__file__).parent
 HN_LINE_RE = re.compile(
     r"^\d+\.\s+\*\*(?P<title>.+?)\*\*\s+\(score:\s*(?P<score>\d+),\s*comments:\s*(?P<comments>\d+)\)$"
@@ -48,6 +66,9 @@ GITHUB_LINE_RE = re.compile(
 )
 PRODUCT_HUNT_LINE_RE = re.compile(
     r"^\d+\.\s+\*\*(?P<title>.+?)\*\*\s+\(by (?P<author>.+?)\)$"
+)
+LINK_LIST_ITEM_RE = re.compile(
+    r"^\d+\.\s+\[(?P<title>.+?)\]\((?P<url>https?://.+?)\)\s+[—-]\s+(?P<tail>.+)$"
 )
 MARKDOWN_LINK_LINE_RE = re.compile(r"^\d+\.\s+\[.+?\]\(https?://.+?\)\s+—\s+.+$")
 X_TREND_LINE_RE = re.compile(r"^\d+\.\s+.+?\s+—\s+.+$")
@@ -408,6 +429,62 @@ def build_heartbeat_signals(raw_heartbeat: str) -> list[HeartbeatSignal]:
 
 
 @beartype
+def fetch_hn_weekly_stories(limit: int = 20) -> list[tuple[str, str, int, int]]:
+    """Fetch a rolling 7d HN pool for AI/dev topics and rank it locally."""
+    cutoff_ts = int((datetime.now(timezone.utc) - timedelta(days=7)).timestamp())
+    ranked_hits: dict[str, tuple[str, str, int, int, float]] = {}
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
+        )
+    }
+
+    try:
+        with httpx.Client(timeout=20, headers=headers) as client:
+            for query in HN_WEEKLY_QUERIES:
+                response = client.get(
+                    HN_ALGOLIA_SEARCH_API,
+                    params={
+                        "query": query,
+                        "tags": "story",
+                        "numericFilters": f"created_at_i>{cutoff_ts}",
+                        "hitsPerPage": HN_WEEKLY_QUERY_LIMIT,
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+                for hit in payload.get("hits", []):
+                    title = str(hit.get("title") or "").strip()
+                    if not title:
+                        continue
+
+                    object_id = str(hit.get("objectID") or "").strip()
+                    fallback_url = (
+                        f"https://news.ycombinator.com/item?id={object_id}" if object_id else ""
+                    )
+                    url = str(hit.get("url") or fallback_url).strip()
+                    if not url:
+                        continue
+
+                    points = int(hit.get("points") or 0)
+                    comments = int(hit.get("num_comments") or 0)
+                    rank = float(points) + comments * 0.4
+                    existing = ranked_hits.get(url)
+                    if existing is not None and existing[4] >= rank:
+                        continue
+
+                    ranked_hits[url] = (title, url, points, comments, rank)
+    except Exception as e:
+        print(f"  HN weekly fetch error: {e}")
+        return []
+
+    ranked = sorted(ranked_hits.values(), key=lambda item: (item[4], item[2], item[3]), reverse=True)
+    return [(title, url, points, comments) for title, url, points, comments, _ in ranked[:limit]]
+
+
+@beartype
 def _is_blocklisted(signal: HeartbeatSignal) -> bool:
     """Check if signal matches the spam/noise blocklist."""
     text = f"{signal.title}\n{signal.description}".lower()
@@ -435,6 +512,17 @@ def _filter_relevant_signals(signals: list[HeartbeatSignal], min_score: float = 
     filtered = [(s, rel) for s, rel in relevant if rel >= min_score]
     filtered.sort(key=lambda x: (x[1], x[0].rank), reverse=True)
     return [s for s, _ in filtered]
+
+
+@beartype
+def _filter_relevant_signals_by_rank(
+    signals: list[HeartbeatSignal],
+    min_score: float = 0.5,
+) -> list[HeartbeatSignal]:
+    """Filter by relevance but keep pure source rank ordering."""
+    filtered = [signal for signal in signals if _personal_relevance_score(signal) >= min_score]
+    filtered.sort(key=lambda signal: signal.rank, reverse=True)
+    return filtered
 
 
 @beartype
@@ -762,8 +850,9 @@ def _sanitize_x_section(summary: str) -> str | None:
         stripped = line.strip()
         if not stripped:
             continue
-        if X_TREND_LINE_RE.match(stripped):
-            sanitized.append(stripped)
+        normalized = _normalize_x_item_line(stripped)
+        if normalized:
+            sanitized.append(normalized)
             item_count += 1
             continue
         if stripped.startswith("### ") and item_count > 0:
@@ -774,6 +863,200 @@ def _sanitize_x_section(summary: str) -> str | None:
     if item_count < 2:
         return None
     return "\n".join(sanitized)
+
+
+@beartype
+def _load_rolling_leaderboard_state() -> dict[str, dict[str, int]]:
+    if not ROLLING_LEADERBOARD_STATE_PATH.exists():
+        return {}
+
+    try:
+        payload = json.loads(ROLLING_LEADERBOARD_STATE_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    raw_positions = payload.get("positions", {})
+    if not isinstance(raw_positions, dict):
+        return {}
+
+    positions: dict[str, dict[str, int]] = {}
+    for board_key, board_positions in raw_positions.items():
+        if not isinstance(board_key, str) or not isinstance(board_positions, dict):
+            continue
+        positions[board_key] = {}
+        for url, position in board_positions.items():
+            if isinstance(url, str) and isinstance(position, int):
+                positions[board_key][url] = position
+    return positions
+
+
+@beartype
+def _save_rolling_leaderboard_state(positions: dict[str, dict[str, int]]) -> None:
+    RUNTIME_INSPECT_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "positions": positions,
+    }
+    ROLLING_LEADERBOARD_STATE_PATH.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+@beartype
+def _movement_marker(previous_positions: dict[str, int], url: str, current_position: int) -> str:
+    previous_position = previous_positions.get(url)
+    if previous_position is None:
+        return "new"
+    delta = previous_position - current_position
+    if delta > 0:
+        return f"↑{delta}"
+    if delta < 0:
+        return f"↓{abs(delta)}"
+    return "="
+
+
+@beartype
+def _render_leaderboard_section(
+    header: str,
+    board_key: str,
+    signals: list[HeartbeatSignal],
+    previous_state: dict[str, dict[str, int]],
+) -> tuple[str | None, dict[str, int]]:
+    if not signals:
+        return None, {}
+
+    previous_positions = previous_state.get(board_key, {})
+    current_positions: dict[str, int] = {}
+    lines = [f"### {header}"]
+
+    for position, signal in enumerate(signals[:WEEKLY_LEADERBOARD_LIMIT], start=1):
+        current_positions[signal.url] = position
+        marker = _movement_marker(previous_positions, signal.url, position)
+        lines.append(
+            f"{position}. [{signal.title}]({signal.url}) - {signal.stats_label} | {marker}"
+        )
+
+    return "\n".join(lines), current_positions
+
+
+@beartype
+def _annotate_link_section_with_movement(
+    section: str | None,
+    board_key: str,
+    previous_state: dict[str, dict[str, int]],
+) -> tuple[str | None, dict[str, int]]:
+    if not section:
+        return None, {}
+
+    previous_positions = previous_state.get(board_key, {})
+    current_positions: dict[str, int] = {}
+    annotated: list[str] = []
+
+    for line in section.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(tuple(str(i) + "." for i in range(1, 11))):
+            annotated.append(stripped if stripped else line)
+            continue
+
+        match = re.match(
+            r"^(?P<idx>\d+)\.\s+\[(?P<title>.+?)\]\((?P<url>https?://.+?)\)\s+[—-]\s+(?P<body>.+)$",
+            stripped,
+        )
+        if not match:
+            annotated.append(stripped)
+            continue
+
+        idx = int(match.group("idx"))
+        url = match.group("url")
+        current_positions[url] = idx
+        marker = _movement_marker(previous_positions, url, idx)
+        annotated.append(
+            f"{idx}. [{match.group('title')}]({url}) — {match.group('body').strip()} | {marker}"
+        )
+
+    return "\n".join(annotated), current_positions
+
+
+@beartype
+def _normalize_x_item_line(line: str) -> str | None:
+    stripped = line.strip()
+    match = re.match(r"^(?P<idx>\d+)\.\s+(?P<body>.+)$", stripped)
+    if not match:
+        return None
+
+    idx = match.group("idx")
+    body = match.group("body").strip()
+    body = re.sub(r"^\*\*(.+?)\*\*:\s*", r"\1 — ", body)
+    body = re.sub(r"^\*\*(.+?)\*\*$", r"\1", body)
+    if "—" not in body and ":" in body:
+        head, tail = body.split(":", 1)
+        body = f"{head.strip()} — {tail.strip()}"
+    body = body.replace("**", "").strip()
+    if not body:
+        return None
+    return f"{idx}. {body}"
+
+
+@beartype
+def _tidy_tg_digest_links_section(digest: str) -> str:
+    if "*Топ материалы за неделю*" not in digest:
+        return digest
+
+    patterns = [
+        r"(\*\*Ссылки\*\*\n)- \*В текущем окне наблюдения участники не делились полезными ссылками\.\*",
+        r"(\*\*Ссылки\*\*\n)- За текущее окно наблюдения участники не поделились внешними ссылками\.",
+        r"(\*\*Ссылки\*\*\n)- \*В текущем окне наблюдения не было полезных ссылок\.\*",
+    ]
+    replacement = r"\1- В текущем окне свежих ссылок не было. Ниже смотри *Топ материалы за неделю* — там все материалы, которые реально тащили в чат."
+    normalized = digest
+    for pattern in patterns:
+        normalized = re.sub(pattern, replacement, normalized)
+    normalized = re.sub(
+        r"(\*\*РЎСЃС‹Р»РєРё\*\*\n)- Р’ С‚РµРєСѓС‰РµРј РѕРєРЅРµ РЅР°Р±Р»СЋРґРµРЅРёСЏ СѓС‡Р°СЃС‚РЅРёРєРё РЅРµ РїСЂРёРЅРѕСЃРёР»Рё РїСЂСЏРјС‹С… URL, [^\n]+",
+        replacement,
+        normalized,
+    )
+    normalized = re.sub(
+        r"(\*\*РЎСЃС‹Р»РєРё\*\*\n)- \*?Р’ С‚РµРєСѓС‰РµРј РѕРєРЅРµ РЅР°Р±Р»СЋРґРµРЅРёСЏ СѓС‡Р°СЃС‚РЅРёРєРё РЅРµ РґРµР»РёР»РёСЃСЊ СЃСЃС‹Р»РєР°РјРё\.?\*?",
+        replacement,
+        normalized,
+    )
+    normalized = re.sub(
+        r"(\*\*Ссылки\*\*\n)- \*?[^\n]*не делились ссылками[^\n]*\*?",
+        r"\1- В текущем окне свежих ссылок не было. Ниже смотри *Топ материалы за неделю* — там всё, что реально тащили в чат.",
+        normalized,
+    )
+    normalized = re.sub(
+        r"(\*\*[^\n]*Ссылки\*\*\n)- \*?[^\n]*не делились ссылками[^\n]*\*?",
+        r"\1- В текущем окне свежих ссылок не было. Ниже смотри *Топ материалы за неделю* — там всё, что реально тащили в чат.",
+        normalized,
+    )
+    return normalized
+
+
+@beartype
+def _signals_from_link_section(summary: str, source: str) -> list[HeartbeatSignal]:
+    signals: list[HeartbeatSignal] = []
+
+    for index, line in enumerate(summary.splitlines(), start=1):
+        stripped = line.strip()
+        match = LINK_LIST_ITEM_RE.match(stripped)
+        if not match:
+            continue
+
+        tail = match.group("tail").strip()
+        stats_label, _, description = tail.partition(":")
+        signals.append(HeartbeatSignal(
+            source=source,
+            title=match.group("title"),
+            url=match.group("url"),
+            stats_label=stats_label.strip() or source,
+            rank=float(100 - index),
+            description=description.strip(),
+        ))
+
+    return signals
 
 
 @beartype
@@ -921,8 +1204,119 @@ def fetch_reddit_ai_radar() -> str | None:
 def format_heartbeat_for_daily(raw_heartbeat: str, date_label: str) -> str:
     """Build a concise heartbeat block for the daily digest."""
     sections: list[str] = []
+    used_reddit_radar_for_leaderboard = False
 
     try:
+        leaderboard_state = _load_rolling_leaderboard_state()
+        next_leaderboard_state = dict(leaderboard_state)
+
+        hn_header = "HN Top-10 за 7 дней"
+        hn_weekly_stories = fetch_hn_weekly_stories(limit=25)
+        hn_weekly_signals = [
+            HeartbeatSignal(
+                source="HN",
+                title=title,
+                url=url,
+                stats_label=f"HN score {score}, comments {comments}",
+                rank=float(score) + comments * 0.4,
+            )
+            for title, url, score, comments in hn_weekly_stories
+        ]
+        hn_weekly_signals = _filter_relevant_signals_by_rank(hn_weekly_signals, min_score=0.5)
+        hn_leaderboard, hn_positions = _render_leaderboard_section(
+            "HN Top-10 за 7 дней",
+            "hn_7d",
+            hn_weekly_signals,
+            leaderboard_state,
+        )
+        hn_summary = summarize_links_ru(
+            hn_weekly_stories[:WEEKLY_LEADERBOARD_LIMIT],
+            "Hacker News",
+            hn_header,
+            include_stats=True,
+        )
+        clean_hn_leaderboard = (
+            _sanitize_link_section(
+                hn_summary,
+                hn_header,
+                min(WEEKLY_LEADERBOARD_LIMIT, len(hn_weekly_signals)),
+            )
+            if hn_summary and _validate_summary(hn_summary, min(WEEKLY_LEADERBOARD_LIMIT, len(hn_weekly_signals)))
+            else None
+        )
+        if clean_hn_leaderboard:
+            hn_leaderboard, hn_positions = _annotate_link_section_with_movement(
+                clean_hn_leaderboard,
+                "hn_7d",
+                leaderboard_state,
+            )
+        if hn_leaderboard:
+            sections.append(hn_leaderboard)
+            next_leaderboard_state["hn_7d"] = hn_positions
+
+        reddit_header = "Reddit Top-10 за 7 дней"
+        reddit_weekly_posts = extract_reddit_posts(raw_heartbeat, limit=20)
+        reddit_weekly_signals = [
+            HeartbeatSignal(
+                source="Reddit",
+                title=title,
+                url=url,
+                stats_label=f"Reddit r/{sub}, score {score}, comments {comments}",
+                rank=score * 0.6 + comments * 1.4,
+            )
+            for title, url, score, comments, sub in reddit_weekly_posts
+        ]
+        reddit_weekly_signals = _filter_relevant_signals_by_rank(reddit_weekly_signals, min_score=0.5)
+        if not reddit_weekly_signals:
+            reddit_radar = fetch_reddit_ai_radar()
+            clean_reddit_radar = (
+                _sanitize_link_section(reddit_radar, "Reddit Радар", 4)
+                if reddit_radar and _validate_summary(reddit_radar, 4)
+                else None
+            )
+            if clean_reddit_radar:
+                reddit_weekly_signals = _signals_from_link_section(clean_reddit_radar, "Reddit Search")
+                used_reddit_radar_for_leaderboard = bool(reddit_weekly_signals)
+        reddit_leaderboard, reddit_positions = _render_leaderboard_section(
+            "Reddit Top-10 за 7 дней",
+            "reddit_7d",
+            reddit_weekly_signals,
+            leaderboard_state,
+        )
+        reddit_summary = summarize_links_ru(
+            reddit_weekly_posts[:WEEKLY_LEADERBOARD_LIMIT],
+            "Reddit",
+            reddit_header,
+        ) if reddit_weekly_posts else None
+        clean_reddit_leaderboard = (
+            _sanitize_link_section(
+                reddit_summary,
+                reddit_header,
+                min(WEEKLY_LEADERBOARD_LIMIT, len(reddit_weekly_signals)),
+            )
+            if reddit_summary and _validate_summary(reddit_summary, min(WEEKLY_LEADERBOARD_LIMIT, len(reddit_weekly_signals)))
+            else None
+        )
+        if not clean_reddit_leaderboard and used_reddit_radar_for_leaderboard:
+            clean_reddit_leaderboard = re.sub(
+                r"^### .+$",
+                f"### {reddit_header}",
+                clean_reddit_radar,
+                count=1,
+            ) if clean_reddit_radar else None
+        if clean_reddit_leaderboard:
+            reddit_leaderboard, reddit_positions = _annotate_link_section_with_movement(
+                clean_reddit_leaderboard,
+                "reddit_7d",
+                leaderboard_state,
+            )
+        if reddit_leaderboard:
+            sections.append(reddit_leaderboard)
+            next_leaderboard_state["reddit_7d"] = reddit_positions
+
+        if next_leaderboard_state:
+            _save_rolling_leaderboard_state(next_leaderboard_state)
+
         signals = build_heartbeat_signals(raw_heartbeat)
 
         # Personal relevance filter — drop noise like Roblox clickers
@@ -1030,7 +1424,7 @@ def format_heartbeat_for_daily(raw_heartbeat: str, date_label: str) -> str:
                 fallback_summary = render_signal_section_fallback(reddit_signals, "Reddit Радар")
                 if fallback_summary:
                     sections.append(fallback_summary)
-        else:
+        elif not used_reddit_radar_for_leaderboard:
             reddit_radar = fetch_reddit_ai_radar()
             clean_reddit_radar = (
                 _sanitize_link_section(reddit_radar, "Reddit Радар", 4)
@@ -1393,6 +1787,8 @@ def main() -> None:
         run_tg_fetch()
         tg_raw_chat = _collect_raw_chat(args.hours)
         tg_digest_text = run_tg_digest(args.dry_run, args.hours)
+        if tg_digest_text:
+            tg_digest_text = _tidy_tg_digest_links_section(tg_digest_text)
 
     # Phase 3: Assemble digest — heartbeat always first, then NLM or TG digest
     parts: list[str] = []
@@ -1432,18 +1828,26 @@ def main() -> None:
     print(f"\n{'='*50}\n{full_digest}\n{'='*50}")
     print(f"Total length: {len(full_digest)} chars")
 
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    RUNTIME_INSPECT_DIR.mkdir(parents=True, exist_ok=True)
+    preview_name = (
+        f"daily_digest_{date_str}_dry_run.md"
+        if args.dry_run else
+        f"daily_digest_{date_str}.md"
+    )
+    preview_path = RUNTIME_INSPECT_DIR / preview_name
+    preview_path.write_text(full_digest, encoding="utf-8")
+    print(f"\nSaved preview: {preview_path}")
+
     if args.dry_run:
         print("\nDry run — not sending")
         return
 
     # Save as .md and send as file
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    md_path = Path(f"/tmp/daily_digest_{date_str}.md")
-    md_path.write_text(full_digest, encoding="utf-8")
-    print(f"\nSaved: {md_path}")
 
     caption = f"AI Intelligence Briefing — {date_str}" if used_nlm else f"Daily Digest — {date_str}"
-    msg_id = send_file_to_telegram(md_path, caption, token, chat_id)
+    msg_id = send_file_to_telegram(preview_path, caption, token, chat_id)
     print(f"Sent to Telegram: message_id={msg_id}")
 
 
