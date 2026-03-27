@@ -1,3 +1,4 @@
+<!-- L0: Сравнение Forge + OpenSwarm с Cortex, февраль 2026 — Jules агент -->
 # Исследование: Forge + OpenSwarm — сравнение с Cortex
 **Дата**: 2026-02-26
 **Агент**: Jules

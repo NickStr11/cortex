@@ -1,3 +1,4 @@
+<!-- L0: Dev context 11-19 марта — PharmOrder sync, TG-Pharma bot, kwork automation -->
 # Development Context Log
 
 > Последние записи. Архив до 03-16: `archive/dev-context-pre-mar16.md`

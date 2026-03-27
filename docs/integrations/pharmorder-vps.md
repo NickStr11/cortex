@@ -1,3 +1,4 @@
+<!-- L0: PharmOrder production — 194.87.140.204:8000, API, DB, деплой, TZ Moscow -->
 # PharmOrder VPS
 
 ## Server

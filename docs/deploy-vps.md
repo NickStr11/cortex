@@ -1,3 +1,4 @@
+<!-- L0: VPS деплой — безопасность, SSH, systemd, PharmOrder на 194.87.140.204 -->
 # VPS Deployment Guide
 
 ## 1. Подготовка безопасности

@@ -1,3 +1,4 @@
+<!-- L0: Git conventions — conventional commits, branch strategy, PR flow -->
 # Git Flow Workflow
 
 Стандартный Git-воркфлоу для проектов.

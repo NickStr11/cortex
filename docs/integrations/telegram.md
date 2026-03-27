@@ -1,3 +1,4 @@
+<!-- L0: Telegram — бот @cipher_think_bot, Telethon userbot на VM, каналы, TG-Pharma -->
 # Telegram Integration
 
 ## Bot

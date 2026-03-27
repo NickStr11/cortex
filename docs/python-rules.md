@@ -1,3 +1,4 @@
+<!-- L0: Python правила — uv, pyright strict, ruff, beartype, 700 строк макс -->
 # Python Development Rules
 
 ## Environment

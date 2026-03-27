@@ -1,3 +1,4 @@
+<!-- L0: NotebookLM CLI — auth, создание блокнотов, YouTube анализ, Playwright fallback -->
 # NotebookLM Integration
 
 ## Setup

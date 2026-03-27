@@ -1,3 +1,4 @@
+<!-- L0: Лог инцидентов — root cause analysis, фиксы, append-only -->
 # Incident Log
 
 Автоматический и ручной лог инцидентов. Агент аппендит сюда после каждого root cause analysis.

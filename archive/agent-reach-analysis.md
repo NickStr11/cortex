@@ -1,3 +1,4 @@
+<!-- L0: Анализ Agent-Reach (GitHub) — сравнение с Cortex, рекомендации по интеграции -->
 # Исследование Agent-Reach — Анализ и Рекомендации для Cortex
 
 > Проект: [Agent-Reach](https://github.com/Panniantong/Agent-Reach)

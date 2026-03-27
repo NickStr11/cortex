@@ -1,3 +1,4 @@
+<!-- L0: cortex-vm (34.159.55.61) — SSH, сервисы, Telethon сессия, daily digest -->
 # Google Cloud VM
 
 ## Instance
