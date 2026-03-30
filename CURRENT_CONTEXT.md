@@ -2,37 +2,41 @@
 # Current Context
 
 ## Фокус
-- **VoiceType / Cypher** — voice-to-text + голосовой ассистент (D:\code\2026\3\voice-type). whisper.cpp Vulkan GPU на AMD RX 7800 XT, ~850ms. Cypher: prefix gate, AppResolver (401 app), RapidFuzz. Codex активно пилит.
-- **PharmOrder** — production на VPS (194.87.140.204:8000). TZ=Europe/Moscow. Шрифт починен.
-- **PharmOrder-Local** — аварийный fallback на мамином ноуте.
-- **TG Digest** — на VM, timer 03:00 UTC. Telethon сессия рабочая.
+- **VoiceType / Cypher** — voice-to-text + голосовой ассистент (D:\code\2026\3\voice-type). whisper.cpp Vulkan GPU ~850ms. Cypher: prefix gate, AppResolver, RapidFuzz, Gemini planner (L2). 133 теста. Codex активно пилит.
+- **Browser Use** — установлен (pip, v0.12.5), работает через Gemini 2.5 Flash. Заменяет Playwright MCP для сложных браузерных задач. Тест на Гемотесте — успех с первой попытки.
+- **Анализы крови** — корзина собрана в Гемотесте (Славянск-на-Кубани), 18 анализов, 11 380 ₽. Сдать в пятницу 3 апреля.
+- **PharmOrder** — production на VPS (194.87.140.204:8000). Стабилен.
+- **TG Digest** — на VM, timer 03:00 UTC.
 - **Kwork Automation** — production pipeline (D:\code\2026\3\kwork).
 - **Funding Scanner** — dashboard на VM (34.159.55.61:8080).
-- **MCP Stack** — Context7, Codex CLI (починен), Exa (дефолтный поиск), Playwright, Context Mode
-- **Diary система** — обкатана. L0 заголовки внедрены. 10 записей.
+- **MCP Stack** — Context7, Codex CLI, Exa, Playwright, Context Mode, Browser Use
+- **Diary система** — 11 записей.
 
-## Что сделано (session 010, 2026-03-29)
-- **whisper.cpp Vulkan GPU** — заменили faster-whisper CPU (~4с) на whisper.cpp Vulkan (~850ms). Свежая сборка v1.8.4 (MinGW + GGML_NO_BACKTRACE). Быстрее SuperWhisper.
-- **Cypher** — голосовой ассистент поверх VoiceType. Prefix gate, regex, AppResolver + RapidFuzz (401 app). Codex написал модуль.
-- **Codex CLI MCP** — починен (недостающий @openai/codex-win32-x64)
-- **Alt+М** — keybinding для вставки скриншотов на русской раскладке
-- **Ollama удалена** — -3.1GB (модели не нужны)
-- **Code quality** — 96 тестов, pyright 0, ruff 0. Тесты переписаны, timeout fallback, uuid paths.
-- **PharmOrder** — шрифт fallback починен (Fira Code → Courier New → monospace)
+## Что сделано (session 011, 2026-03-30)
+- **Cypher v2 updates (Codex)** — safe system targets (панель управления, загрузки, параметры), TelegramWebExecutor search/read, расширен planner vocabulary. 133 теста.
+- **Browser Use** — установлен, протестирован с Gemini Flash. Работает кратно лучше Playwright MCP для форм/корзин/навигации.
+- **Анализы крови** — выбрана панель 18 показателей, Codex ревьюнул (убрал натяжки), корзина собрана в Гемотесте.
+- **Malwarebytes скан** — чисто (PUP uTorrent + RiskWare zapret/Ammyy, стилеров нет).
+- **Петличка DJI Mic Mini** — выбрана, найдена на Ozon за 4 443 ₽.
+- **Новые memory-правила** — browser-use > playwright, 1 фейл → менять инструмент, не предлагать отдых.
 
 ## Ближайшие шаги
-- [ ] **Cypher v2: Planner** — маршрутизатор команд (capability / browser_agent / reject)
-- [ ] **Cypher v2: Domain Executors** — Telegram (saved messages URL), Steam (steam://), Яндекс Музыка
-- [ ] **Cypher v2: Browser Use** — fallback для сложных multi-step веб-задач
-- [ ] **whisper.cpp: MSVC build** — для open-source релиза (GitHub Actions, без MinGW DLLs)
-- [ ] **whisper.cpp: soak test** — 100+ запросов для проверки стабильности Vulkan
-- [ ] **VoiceType: GitHub релиз** — README, .env.example с OpenRouter, инструкция по установке
-- [ ] **Subagents playbook experiment** — срез 2026-04-01, оценить эффект
-- [ ] **Обкатать /reflect** — следующий прогон (уже 10 diary записей)
+- [ ] **Анализы крови** — сдать в пятницу 3 апреля, натощак до 10:00
+- [ ] **Петличка DJI Mic Mini** — заказать на Ozon (распродажа заканчивается)
+- [ ] **Cypher: Browser Use интеграция** — L3 path для сложных браузерных задач через browser-use
+- [ ] **Cypher: протестировать новые фичи живьём** — system targets, telegram search/read
+- [ ] **OpenClaw** — попробовать установить, оценить для сложных multi-step задач
+- [ ] **Subagents playbook experiment** — срез 2026-04-01
+- [ ] **Обкатать /reflect** — 11 diary записей, пора
+- [ ] **whisper.cpp: soak test** — 100+ запросов для стабильности Vulkan
 - [ ] **Funding: EdgeX verifier** — сравнить fundingRate vs forecastFundingRate
+- [ ] **Keenetic Hopper** — настроить WireGuard VPN + policy routing + DoH
 
 ## Ссылки
 - VoiceType / Cypher: `D:\code\2026\3\voice-type` (.planning/ внутри)
+- Browser Use тест: `C:\tmp\browser_use_test.py`
+- Анализы rationale: `~/Desktop/blood_tests_rationale.md`
+- Задача для Codex (Гемотест): `~/Desktop/gemotest_task_for_codex.md`
 - whisper.cpp build: `D:\code\2026\3\whisper-cpp-build`
 - whisper.cpp бинарники + модель: `D:\code\2026\3\voice-type\runtime\whisper-cpp\`
 - PharmOrder-Local: `~/Desktop/PharmOrder-Local/`
