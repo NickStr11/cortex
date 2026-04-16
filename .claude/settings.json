@@ -1,5 +1,4 @@
 {
-  "disabledMcpjsonServers": ["sequential-thinking"],
   "hooks": {
     "PreToolUse": [
       {
