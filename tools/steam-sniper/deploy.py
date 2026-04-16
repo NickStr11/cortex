@@ -12,9 +12,15 @@ from pathlib import Path
 
 import paramiko
 
+# Force UTF-8 stdout on Windows — apt/uv output contains Unicode chars (→, ✓)
+# that break default cp1251 encoding.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # --- Constants ---
 
-VPS_HOST = "194.87.140.204"
+VPS_HOST = "72.56.37.150"
 VPS_USER = "root"
 REMOTE_DIR = "/opt/steam-sniper"
 SERVICE_DASHBOARD = "steam-sniper-dashboard"
@@ -117,16 +123,20 @@ def connect() -> paramiko.SSHClient:
 
 
 def _ensure_remote_dir(sftp: paramiko.SFTPClient, path: str) -> None:
-    """Create remote directory if it doesn't exist (mkdir -p equivalent)."""
+    """Create remote directory if it doesn't exist (mkdir -p equivalent).
+
+    Uses string split instead of Path — Path on Windows converts / to \\ which
+    breaks SFTP paths on remote Linux.
+    """
     dirs_to_create: list[str] = []
     current = path
-    while current and current != "/":
+    while current and current != "/" and "/" in current:
         try:
             sftp.stat(current)
             break
-        except FileNotFoundError:
+        except (FileNotFoundError, IOError):
             dirs_to_create.append(current)
-            current = str(Path(current).parent)
+            current = current.rsplit("/", 1)[0]
 
     for d in reversed(dirs_to_create):
         try:
@@ -162,11 +172,12 @@ def upload_files(client: paramiko.SSHClient) -> None:
                 continue
             rel = local_file.relative_to(local_root)
             remote_path = f"{REMOTE_DIR}/{rel.as_posix()}"
-            # Ensure remote directory exists
-            remote_dir = str(Path(remote_path).parent)
+            # Ensure remote directory exists (string split — NOT Path, to avoid
+            # Windows backslash conversion on remote Linux SFTP path)
+            remote_dir = remote_path.rsplit("/", 1)[0]
             _ensure_remote_dir(sftp, remote_dir)
             sftp.put(str(local_file), remote_path)
-            print(f"  {rel} -> {remote_path}")
+            print(f"  {rel} -> {remote_path}", flush=True)
 
     # Upload systemd units
     print("\n[6/10] Uploading systemd unit files...")

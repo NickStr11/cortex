@@ -3,6 +3,7 @@
 
 ## Фокус
 - **PharmOrder** — production на VPS (194.87.140.204:8000). Hardened: swap 1GB, MemoryMax=450M, Steam Sniper убран. Sync retry fix на мамином ноуте.
+- **Steam Sniper** — production на новом VPS Timeweb (72.56.37.150). Dashboard http://72.56.37.150/, bot + dashboard active.
 - **VoiceType / Cypher** — voice-to-text + голосовой ассистент (D:\code\2026\3\voice-type). whisper.cpp Vulkan GPU, server mode. В автозагрузке.
 - **Klink** — продуктовые видео-шоты с Лёшей @olmogoodwin. Kling 3.0 / Veo 3.1 / Seedance 2.0.
 - **TG Digest** — на VM, timer 03:00 UTC.
@@ -37,11 +38,14 @@
 - [x] Dedup выгрузок: server.py на VPS — MD5 hash корзины, 2 мин окно (2026-04-15). Бэкап: server.py.bak
 - [ ] Проверить через 2-3 дня: нет ли OOM, проблем с sync
 
-### 2. Steam Sniper — деплой на новый VPS
-- [x] Заказать VPS (Timeweb Cloud, 1GB RAM, Москва, 530 ₽/мес) — 2026-04-16
-- [ ] Получить IP, SSH доступ
-- [ ] Задеплоить из runtime/steam-sniper-vps-backup/ + tools/steam-sniper/
-- [ ] Мерж Codex изменений (D:\code\2026\3\steam-sniper → tools/steam-sniper)
+### 2. Steam Sniper — деплой на новый VPS ✅
+- [x] Заказать VPS (Timeweb Cloud, 1GB RAM, Москва, ~530 ₽/мес) — 2026-04-16
+- [x] Получить IP (72.56.37.150), SSH ключ подключен (2026-04-16)
+- [x] Задеплоить — dashboard + bot active, nginx proxy 80→8100 (2026-04-16)
+- [x] Мерж Codex — не нужен, код идентичен (diff только в .planning/*)
+- Fix в deploy.py: Windows Path → posix split (rsplit "/"), UTF-8 stdout reconfigure
+- [ ] HTTPS через duckdns + certbot (отложено)
+- [ ] Проверить бота через сутки — не падает ли OOM
 
 ### 3. Прочие задачи
 - [ ] Klink: Seedance 2.0 — выбрать платформу (Jimeng vs Dreamina)
