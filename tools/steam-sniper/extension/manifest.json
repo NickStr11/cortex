@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Steam Sniper",
+  "version": "1.0",
+  "description": "Add items from lis-skins.com to Steam Sniper dashboard",
+  "permissions": [],
+  "host_permissions": [
+    "http://194.87.140.204/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://lis-skins.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

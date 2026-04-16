@@ -9,7 +9,7 @@
 - **Funding Scanner** — dashboard на VM (34.159.55.61:8080).
 - **Steam Sniper** — убран с VPS, код в `tools/steam-sniper/` + бэкап `runtime/steam-sniper-vps-backup/`. Ждёт другой VPS.
 - **MCP Stack** — Context7, Codex CLI, Exa, Playwright, Context Mode, Browser Use
-- **Diary система** — 15 записей.
+- **Diary система** — ~12 записей (7 в репо `memory/diary/` + 5 в auto-memory).
 
 ## Что сделано (session 016, 2026-04-16)
 

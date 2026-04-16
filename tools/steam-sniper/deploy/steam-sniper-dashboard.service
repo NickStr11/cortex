@@ -1,0 +1,15 @@
+[Unit]
+Description=Steam Sniper Dashboard (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/steam-sniper
+ExecStart=/root/.local/bin/uv run python server.py
+Restart=on-failure
+RestartSec=10
+EnvironmentFile=/opt/steam-sniper/.env
+
+[Install]
+WantedBy=multi-user.target

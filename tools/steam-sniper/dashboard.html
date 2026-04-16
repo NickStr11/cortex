@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#060a12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Steam Sniper">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<title>Steam Sniper</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/styles.css">
+<script src="https://unpkg.com/lightweight-charts@5/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      <div class="dot"></div>
+      Steam Sniper
+    </div>
+    <div class="header-stats">
+      <div class="header-stat">
+        <span class="label">USD/RUB</span>
+        <span class="value" id="usdRate">&mdash;</span>
+      </div>
+      <div class="header-stat">
+        <span class="label">На lis-skins</span>
+        <span class="value" id="totalItems">&mdash;</span>
+      </div>
+      <div class="header-stat">
+        <span class="label">Обновлено</span>
+        <span class="value" id="lastUpdate">&mdash;</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hero Stats -->
+  <div id="heroStats" class="hero-stats">
+    <div class="hero-card">
+      <div class="hc-label">Portfolio Value</div>
+      <div class="hc-value" id="heroValue">--</div>
+    </div>
+    <div class="hero-card">
+      <div class="hc-label">Delta</div>
+      <div class="hc-value" id="heroDelta">--</div>
+    </div>
+    <div class="hero-card">
+      <div class="hc-label">Items</div>
+      <div class="hc-value" id="heroCount">--</div>
+    </div>
+  </div>
+
+  <!-- Search -->
+  <div class="search-section">
+    <input class="search-input" id="searchInput" type="text"
+      placeholder="Поиск предмета... (начни вводить название)" autocomplete="off" />
+    <div class="search-results" id="searchResults"></div>
+  </div>
+
+  <!-- Tab Navigation -->
+  <nav class="tab-nav">
+    <button class="tab-nav-item active" data-tab="watchlist">Watchlist</button>
+    <button class="tab-nav-item" data-tab="catalog">Каталог</button>
+    <button class="tab-nav-item" data-tab="favorites">Избранное</button>
+    <button class="tab-nav-item" data-tab="wishlist">Хотелки</button>
+    <button class="tab-nav-item" data-tab="cases">Кейсы</button>
+  </nav>
+
+  <!-- Watchlist Tab -->
+  <div class="tab-panel" data-tab="watchlist">
+    <!-- Chart Panel (hidden by default) -->
+    <div id="chartPanel" class="chart-panel" style="display:none;">
+      <div class="chart-header">
+        <div class="chart-title">
+          <span id="chartItemName">&mdash;</span>
+          <button class="chart-close" id="chartClose">&#10005;</button>
+        </div>
+        <div class="chart-timeframes" id="chartTimeframes">
+          <button class="tf-btn" data-tf="24h">24H</button>
+          <button class="tf-btn active" data-tf="7d">7D</button>
+          <button class="tf-btn" data-tf="30d">30D</button>
+          <button class="tf-btn" data-tf="all">ALL</button>
+        </div>
+      </div>
+      <div id="chartContainer" style="height: 300px;"></div>
+      <div class="chart-stats" id="chartStats">
+        <div class="cs-item"><span class="cs-label">Min</span><span class="cs-value" id="csMin">&mdash;</span></div>
+        <div class="cs-item"><span class="cs-label">Max</span><span class="cs-value" id="csMax">&mdash;</span></div>
+        <div class="cs-item"><span class="cs-label">Avg</span><span class="cs-value" id="csAvg">&mdash;</span></div>
+        <div class="cs-item"><span class="cs-label">Count</span><span class="cs-value" id="csCount">&mdash;</span></div>
+      </div>
+    </div>
+
+    <!-- Watchlist -->
+    <div id="watchlistArea"></div>
+
+    <!-- Activity Feed -->
+    <div id="activityFeed" class="activity-feed">
+      <div class="section-title">Activity Feed</div>
+      <div id="alertsList"></div>
+    </div>
+  </div>
+
+  <!-- Catalog Tab (Phase 8) -->
+  <div class="tab-panel" data-tab="catalog" style="display:none;">
+    <div class="catalog-layout">
+      <!-- Sidebar -->
+      <aside class="catalog-sidebar" id="catalogSidebar">
+        <div class="sidebar-title">Categories</div>
+        <button class="sidebar-item active" data-category="">
+          <span class="sidebar-name">All</span>
+          <span class="sidebar-count" id="catCountAll">--</span>
+        </button>
+        <!-- Dynamic category buttons injected by catalog.js -->
+      </aside>
+
+      <!-- Main content -->
+      <div class="catalog-main">
+        <!-- Controls: search + sort -->
+        <div class="catalog-controls">
+          <input class="catalog-search" id="catalogSearch" type="text"
+            placeholder="Search catalog..." autocomplete="off" />
+          <select class="catalog-sort" id="catalogSort">
+            <option value="name_asc">Name A-Z</option>
+            <option value="name_desc">Name Z-A</option>
+            <option value="price_asc">Price Low</option>
+            <option value="price_desc">Price High</option>
+            <option value="count_desc">Available</option>
+          </select>
+        </div>
+
+        <!-- Card grid -->
+        <div class="cat-grid" id="catalogGrid">
+          <div class="empty-state">Loading...</div>
+        </div>
+
+        <!-- Pagination -->
+        <div class="cat-pagination" id="catalogPagination"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Favorites Tab (Phase 8) -->
+  <div class="tab-panel" data-tab="favorites" style="display:none;">
+    <div id="favoritesGrid">
+      <div class="empty-state">No favorites yet -- click &#9825; on catalog cards</div>
+    </div>
+  </div>
+
+  <!-- Wishlist Tab (Phase 8) -->
+  <div class="tab-panel" data-tab="wishlist" style="display:none;">
+    <div id="wishlistGrid">
+      <div class="empty-state">Wishlist is empty -- click &#9734; on catalog cards</div>
+    </div>
+  </div>
+
+  <!-- Cases Tab (Phase 9) -->
+  <div class="tab-panel" data-tab="cases" style="display:none;">
+    <div class="cases-layout">
+      <div class="cases-controls">
+        <input class="catalog-search" id="casesSearch" type="text"
+          placeholder="Search cases..." autocomplete="off" />
+        <select class="catalog-sort" id="casesSort">
+          <option value="name_asc">Name A-Z</option>
+          <option value="name_desc">Name Z-A</option>
+          <option value="price_asc">Price Low</option>
+          <option value="price_desc">Price High</option>
+          <option value="count_desc">Available</option>
+        </select>
+      </div>
+      <div class="cat-grid" id="casesGrid">
+        <div class="empty-state">Loading...</div>
+      </div>
+      <div class="cat-pagination" id="casesPagination"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h2 id="modalName"></h2>
+    <div class="modal-subtitle" id="modalAvail"></div>
+    <div class="modal-current">
+      <span id="modalPriceRub"></span>
+      <span class="usd" id="modalPriceUsd"></span>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Тип</label>
+        <select id="modalType">
+          <option value="buy">Покупка (алерт когда ниже)</option>
+          <option value="sell">Продажа (алерт когда выше)</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Целевая цена (₽)</label>
+        <input type="number" id="modalTarget" step="1" min="0" placeholder="0" />
+      </div>
+      <div class="form-group">
+        <label>Количество</label>
+        <input type="number" id="modalQty" value="1" min="1" step="1" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Название на русском</label>
+        <input type="text" id="modalDisplayName" placeholder="Спокойствие (Немного поношенное)" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Категория</label>
+        <input type="text" id="modalCategory" placeholder="Дробовик" />
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel">Отмена</button>
+      <button class="btn btn-primary">Добавить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js')
+    .then(r => console.log('SW registered:', r.scope))
+    .catch(e => console.error('SW registration failed:', e));
+}
+</script>
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

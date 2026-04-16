@@ -1,0 +1,90 @@
+/* Steam Sniper -- Injected styles for lis-skins.com */
+/* All classes prefixed with sniper- to avoid conflicts */
+
+.sniper-btn-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999999;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.sniper-btn {
+  background: #e67e22;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: background 0.2s;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.sniper-btn:hover {
+  background: #d35400;
+}
+
+.sniper-dropdown {
+  display: none;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  margin-bottom: 8px;
+  overflow: hidden;
+  min-width: 140px;
+}
+
+.sniper-dropdown.sniper-show {
+  display: block;
+}
+
+.sniper-dropdown-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  color: #333;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: background 0.15s;
+}
+
+.sniper-dropdown-item:hover {
+  background: #f0f0f0;
+}
+
+.sniper-dropdown-item:first-child {
+  border-bottom: 1px solid #eee;
+}
+
+/* Toast notifications */
+
+.sniper-toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  z-index: 999999;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.3s;
+}
+
+.sniper-toast.sniper-success {
+  background: #27ae60;
+}
+
+.sniper-toast.sniper-error {
+  background: #e74c3c;
+}
+
+.sniper-toast.sniper-fade-out {
+  opacity: 0;
+}
