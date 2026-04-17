@@ -379,6 +379,31 @@ def remove_list_item(user_id: str, item_name: str, list_type: str) -> int:
 
 
 @beartype
+def rename_list_item(user_id: str, old_name: str, new_name: str, list_type: str) -> int:
+    """Rename an existing list item to its canonical market name.
+
+    If the canonical row already exists, drop the old duplicate.
+    Returns rows changed/removed.
+    """
+    if old_name == new_name:
+        return 0
+
+    with get_conn() as conn:
+        try:
+            cur = conn.execute(
+                "UPDATE user_lists SET item_name=? WHERE user_id=? AND item_name=? AND list_type=?",
+                (new_name, user_id, old_name, list_type),
+            )
+            return cur.rowcount
+        except sqlite3.IntegrityError:
+            cur = conn.execute(
+                "DELETE FROM user_lists WHERE user_id=? AND item_name=? AND list_type=?",
+                (user_id, old_name, list_type),
+            )
+            return cur.rowcount
+
+
+@beartype
 def get_list_items(user_id: str, list_type: str | None = None) -> list[dict]:
     """Return user's list items. If list_type is None, return all lists."""
     with get_conn() as conn:
@@ -395,3 +420,10 @@ def get_list_items(user_id: str, list_type: str | None = None) -> list[dict]:
                 (user_id,),
             ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_all_list_names() -> set[str]:
+    """Return every item_name present in any user_list, regardless of user."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT DISTINCT item_name FROM user_lists").fetchall()
+    return {row[0] for row in rows}

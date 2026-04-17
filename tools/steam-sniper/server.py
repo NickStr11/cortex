@@ -6,6 +6,7 @@ Background collector fetches lis-skins prices every 5 minutes.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -21,8 +22,10 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+import ijson
 from pydantic import BaseModel
 
+from build_image_cache import ensure_image_cache, load_image_cache
 import db
 from category import classify
 
@@ -34,8 +37,11 @@ logger = logging.getLogger("sniper.server")
 # --- Constants ---
 
 LISSKINS_URL = "https://lis-skins.com/market_export_json/csgo.json"
+LISSKINS_FULL_URL = "https://lis-skins.com/market_export_json/api_csgo_full.json"
 CBR_URL = "https://www.cbr-xml-daily.ru/daily_json.js"
 COLLECT_INTERVAL = 300  # 5 minutes
+LISTINGS_CACHE_TTL = 900  # 15 minutes
+ITEM_DETAIL_CACHE_DIR = Path(__file__).parent / "data" / "item_detail_cache"
 MSK = timezone(timedelta(hours=3))
 
 # --- Module-level state ---
@@ -46,6 +52,12 @@ _image_cache: dict[str, str] = {}  # {name_lower: image_url} from ByMykel API
 _usd_rub: float = 0.0
 _last_update: str = ""
 _collector_task: asyncio.Task | None = None
+_warm_task: asyncio.Task | None = None
+
+# Item-detail coordination
+_item_detail_inflight: set[str] = set()  # names with a fetch currently running
+_item_detail_seen: set[str] = set()  # every name ever requested this process
+_warm_interval_s: int = 600  # 10 minutes between warm passes
 
 
 # Lis-skins uses their own USD/RUB rate ≈ CBR × 1.034 (3.4% markup).
@@ -65,6 +77,14 @@ def _fetch_lis_skins() -> list[dict]:
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _fetch_full_listings() -> list[dict]:
+    """Yield the raw lis-skins full-listing stream."""
+    req = urllib.request.Request(
+        LISSKINS_FULL_URL, headers={"User-Agent": "SteamSniper/1.0"}
+    )
+    return urllib.request.urlopen(req, timeout=120)
 
 
 _WEAR_RE = re.compile(r"\s*\((Factory New|Minimal Wear|Field-Tested|Well-Worn|Battle-Scarred)\)$")
@@ -195,11 +215,246 @@ def _get_item_image(name: str) -> str:
 
 def _load_image_cache_from_file() -> dict[str, str]:
     """Load pre-built image cache from data/image_cache.json."""
-    cache_path = Path(__file__).parent / "data" / "image_cache.json"
-    if cache_path.exists():
-        with open(cache_path) as f:
-            return json.loads(f.read())
-    return {}
+    return load_image_cache()
+
+
+def _fix_mojibake(text: str) -> str:
+    """Recover UTF-8 Cyrillic that was mis-decoded as latin-1/cp1252."""
+    if not text or not any(marker in text for marker in ("Ð", "Ñ", "â", "€", "™")):
+        return text
+
+    for encoding in ("latin-1", "cp1252"):
+        try:
+            decoded = text.encode(encoding).decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        if any("\u0400" <= ch <= "\u04ff" for ch in decoded):
+            return decoded
+    return text
+
+
+def _match_catalog_name(query: str) -> str | None:
+    """Return canonical lis-skins name for an unambiguous search query."""
+    words = query.lower().split()
+    if not words:
+        return None
+
+    matches = [
+        item["name"]
+        for name_lower, item in _prices.items()
+        if all(word in name_lower for word in words)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _normalize_spaces(text: str) -> str:
+    """Collapse only real whitespace, without touching mojibake control bytes."""
+    return re.sub(r"[ \t\r\n\f\v]+", " ", text).strip()
+
+
+def _item_cache_path(name: str) -> Path:
+    digest = hashlib.sha1(name.lower().encode("utf-8")).hexdigest()
+    return ITEM_DETAIL_CACHE_DIR / f"{digest}.json"
+
+
+def _load_item_cache(name: str, *, accept_stale: bool = False) -> dict | None:
+    """Load the per-item cache.
+
+    accept_stale: when True, return the payload even if older than
+    LISTINGS_CACHE_TTL, annotating it with `is_stale`. Used by the
+    stale-while-revalidate response path.
+    """
+    path = _item_cache_path(name)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        cached_at = datetime.fromisoformat(payload["cached_at"])
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        return None
+    age = datetime.now(MSK) - cached_at
+    is_stale = age > timedelta(seconds=LISTINGS_CACHE_TTL)
+    if is_stale and not accept_stale:
+        return None
+    payload["is_stale"] = is_stale
+    return payload
+
+
+def _save_item_cache(name: str, payload: dict) -> None:
+    ITEM_DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _item_cache_path(name).write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _num(v):
+    """Coerce ijson numerics (Decimal) and strings into JSON-safe primitives."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return v
+    return int(f) if f.is_integer() else f
+
+
+def _slim_listing(it: dict) -> dict:
+    stickers_raw = it.get("stickers") or []
+    stickers = [
+        {
+            "name": s.get("name"),
+            "image": s.get("image"),
+            "wear": _num(s.get("wear")),
+            "slot": _num(s.get("slot")),
+        }
+        for s in stickers_raw
+    ]
+    return {
+        "id": _num(it.get("id")),
+        "price": float(it["price"]),
+        "float": str(it["item_float"]) if it.get("item_float") is not None else None,
+        "paint_index": _num(it.get("item_paint_index")),
+        "paint_seed": _num(it.get("item_paint_seed")),
+        "stickers": stickers,
+        "name_tag": it.get("name_tag"),
+        "unlock_at": it.get("unlock_at"),
+        "item_link": it.get("item_link"),
+    }
+
+
+def _fetch_item_listings(name: str, *, store_limit: int = 100) -> dict:
+    """Stream lis-skins full export and keep only one item's listings in memory."""
+    target = name.lower()
+    matched: list[dict] = []
+    total = 0
+
+    with _fetch_full_listings() as resp:
+        for it in ijson.items(resp, "items.item"):
+            item_name = it.get("name")
+            price = it.get("price")
+            if not item_name or price is None or item_name.lower() != target:
+                continue
+            total += 1
+            if len(matched) < store_limit:
+                matched.append(_slim_listing(it))
+
+    matched.sort(key=lambda x: x["price"])
+    payload = {
+        "cached_at": datetime.now(MSK).isoformat(timespec="seconds"),
+        "total": total,
+        "listings": matched,
+    }
+    _save_item_cache(name, payload)
+    return payload
+
+
+def _get_item_listings(name: str, *, limit: int) -> tuple[list[dict], int, str]:
+    cached = _load_item_cache(name)
+    if cached is None:
+        cached = _fetch_item_listings(name)
+    return cached["listings"][:limit], cached["total"], cached["cached_at"]
+
+
+def _warm_hot_names() -> set[str]:
+    """Names that should be kept warm: watchlist + all user_lists + recent clicks."""
+    hot = set()
+    try:
+        hot |= db.get_watchlist_names()
+    except Exception:
+        pass
+    try:
+        hot |= db.get_all_list_names()
+    except Exception:
+        pass
+    hot |= _item_detail_seen
+    return hot
+
+
+def _warm_pass(names: set[str], *, store_limit: int = 100) -> dict[str, int]:
+    """One streaming pass over api_csgo_full.json — write a cache file per hot name.
+
+    Skips names whose cache is still fresh (within LISTINGS_CACHE_TTL).
+    Returns {name_lower: total_listings_seen} for the names that got refreshed.
+    """
+    targets: set[str] = set()
+    for n in names:
+        cached = _load_item_cache(n)
+        if cached is None:  # missing or stale
+            targets.add(n.lower())
+    if not targets:
+        return {}
+
+    # name_lower -> {total, matched}
+    buckets: dict[str, dict] = {n: {"total": 0, "matched": []} for n in targets}
+    canonical: dict[str, str] = {}  # name_lower -> real display name seen in data
+
+    with _fetch_full_listings() as resp:
+        for it in ijson.items(resp, "items.item"):
+            item_name = it.get("name")
+            price = it.get("price")
+            if not item_name or price is None:
+                continue
+            key = item_name.lower()
+            bucket = buckets.get(key)
+            if bucket is None:
+                continue
+            bucket["total"] += 1
+            canonical.setdefault(key, item_name)
+            if len(bucket["matched"]) < store_limit:
+                bucket["matched"].append(_slim_listing(it))
+
+    now = datetime.now(MSK).isoformat(timespec="seconds")
+    counts: dict[str, int] = {}
+    for key, b in buckets.items():
+        b["matched"].sort(key=lambda x: x["price"])
+        payload = {
+            "cached_at": now,
+            "total": b["total"],
+            "listings": b["matched"],
+        }
+        _save_item_cache(canonical.get(key, key), payload)
+        counts[key] = b["total"]
+    return counts
+
+
+async def _warm_cache_once() -> None:
+    """Async wrapper: run one warm pass in a worker thread."""
+    hot = _warm_hot_names()
+    if not hot:
+        return
+    try:
+        counts = await asyncio.to_thread(_warm_pass, hot)
+    except Exception as e:
+        logger.warning("Warm cache pass failed: %s", e)
+        return
+    if counts:
+        logger.info("Warmed item-detail cache: %d names", len(counts))
+
+
+async def _warm_cache_loop() -> None:
+    while True:
+        await asyncio.sleep(_warm_interval_s)
+        try:
+            await _warm_cache_once()
+        except Exception as e:
+            logger.error("Warm cache loop error: %s", e)
+
+
+async def _background_fetch(name: str) -> None:
+    """Fetch a single item's listings in the background, dedup via _inflight."""
+    key = name.lower()
+    if key in _item_detail_inflight:
+        return
+    _item_detail_inflight.add(key)
+    try:
+        await asyncio.to_thread(_fetch_item_listings, name)
+    except Exception as e:
+        logger.warning("Background item fetch failed for %s: %s", name, e)
+    finally:
+        _item_detail_inflight.discard(key)
 
 
 def _fetch_usd_rub() -> float:
@@ -246,13 +501,21 @@ def _calc_trend(name_lower: str) -> dict:
 
 
 async def _load_image_cache() -> None:
-    """Load item images from local file (fast, no network)."""
+    """Ensure image cache exists locally and load it into memory."""
     global _image_cache
     try:
-        _image_cache = await asyncio.to_thread(_load_image_cache_from_file)
-        logger.info("Image cache loaded: %d items", len(_image_cache))
+        _image_cache = await asyncio.to_thread(ensure_image_cache)
+        logger.info("Image cache ready: %d items", len(_image_cache))
     except Exception as e:
-        logger.warning("Image cache load failed: %s", e)
+        _image_cache = load_image_cache()
+        if _image_cache:
+            logger.warning(
+                "Image cache refresh failed, using local cache (%d items): %s",
+                len(_image_cache),
+                e,
+            )
+        else:
+            logger.warning("Image cache unavailable: %s", e)
 
 
 async def _collect_once() -> None:
@@ -316,15 +579,19 @@ async def _collector_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """Startup: init db, first collect, start loop. Shutdown: cancel loop."""
-    global _collector_task, _image_cache
+    """Startup: init db, first collect, start loops. Shutdown: cancel loops."""
+    global _collector_task, _warm_task, _image_cache
     db.init_db()
-    # Load image cache immediately (local file, fast)
-    _image_cache = _load_image_cache_from_file()
-    print(f"[STARTUP] Image cache loaded: {len(_image_cache)} items")
+    await _load_image_cache()
     await _collect_once()
     _collector_task = asyncio.create_task(_collector_loop())
+    # First warm pass in the background — don't block startup, but fill caches
+    # for watchlist/favorites/wishlist quickly so the user's first click is instant.
+    asyncio.create_task(_warm_cache_once())
+    _warm_task = asyncio.create_task(_warm_cache_loop())
     yield
+    if _warm_task:
+        _warm_task.cancel()
     if _collector_task:
         _collector_task.cancel()
 
@@ -477,7 +744,7 @@ def get_watchlist() -> dict:
                 "count": item_data["count"] if item_data else None,
                 "url": item_data["url"] if item_data else None,
                 "steam_url": steam_url,
-                "image_url": entry.get("image_url"),
+                "image_url": entry.get("image_url") or _get_item_image(entry["name"]),
                 "rarity_color": _rarity_color(entry.get("category")),
                 "added_at": entry.get("added_at", ""),
             }
@@ -502,7 +769,7 @@ def add_to_watchlist(body: WatchlistAddRequest) -> dict:
         qty=body.qty,
         display_name=body.display_name,
         category=body.category,
-        image_url=body.image_url,
+        image_url=body.image_url or _get_item_image(body.name),
     )
     return {"ok": True, "name": body.name}
 
@@ -565,6 +832,43 @@ def _steam_search(q: str) -> list[dict]:
     return results
 
 
+def _resolve_item_name(name: str) -> str:
+    """Normalize list item names to canonical lis-skins English names."""
+    raw = name.strip()
+    if not raw:
+        return name
+
+    for exact_candidate in (raw, _normalize_spaces(raw)):
+        item = _prices.get(exact_candidate.lower())
+        if item:
+            return item["name"]
+
+    candidates = [raw]
+    fixed = _fix_mojibake(raw)
+    if fixed != raw:
+        candidates.append(fixed)
+
+    for candidate in candidates:
+        candidate = _normalize_spaces(candidate)
+        item = _prices.get(candidate.lower())
+        if item:
+            return item["name"]
+
+        if any("\u0400" <= c <= "\u04ff" for c in candidate):
+            for steam_item in _steam_search(candidate):
+                lis_item = _prices.get(steam_item["hash_name"].lower())
+                if lis_item:
+                    return lis_item["name"]
+
+            en_query = _translate_ru_to_en(candidate)
+            if en_query:
+                matched = _match_catalog_name(en_query)
+                if matched:
+                    return matched
+
+    return raw
+
+
 @app.get("/api/search")
 @beartype
 def search_items(q: str = Query(min_length=2)) -> dict:
@@ -587,7 +891,7 @@ def search_items(q: str = Query(min_length=2)) -> dict:
                 "name": si["hash_name"],
                 "name_ru": si["name_ru"],
                 "type_ru": si["type_ru"],
-                "image": si["image"],
+                "image": si["image"] or _get_item_image(si["hash_name"]),
                 "name_color": si["name_color"],
                 "price": lis_item["price"] if lis_item else None,
                 "price_rub": (
@@ -611,7 +915,7 @@ def search_items(q: str = Query(min_length=2)) -> dict:
                 "name": item["name"],
                 "name_ru": "",
                 "type_ru": "",
-                "image": "",
+                "image": _get_item_image(item["name"]),
                 "name_color": "",
                 "price": item["price"],
                 "price_rub": round(item["price"] * _lis_rate(), 2),
@@ -714,6 +1018,80 @@ def get_catalog(
     }
 
 
+@app.get("/api/item/{name}")
+@beartype
+async def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> dict:
+    """Return detailed listings for a single skin — lis-skins item page mirror.
+
+    Serving strategy:
+    - Fresh cache hit → return immediately.
+    - Stale cache hit → return stale, trigger background refresh (stale-while-revalidate).
+    - Cache miss → return `pending: true` immediately, start background fetch.
+      The frontend polls until `pending` is false.
+    """
+    rate = _lis_rate()
+    key = name.lower()
+    _item_detail_seen.add(key)
+
+    summary_src = _prices.get(key, {})
+    summary = {
+        "name": summary_src.get("name", name),
+        "url": summary_src.get("url", ""),
+        "count": summary_src.get("count", 0),
+        "price_usd": summary_src.get("price"),
+        "price_rub": (
+            round(summary_src["price"] * rate, 2)
+            if summary_src.get("price") is not None else None
+        ),
+        "image": _get_item_image(summary_src.get("name", name)),
+        "category": classify(summary_src.get("name", name)) if summary_src else "",
+        "rarity_color": _rarity_color(summary_src.get("category")),
+    }
+
+    cached = _load_item_cache(name, accept_stale=True)
+    pending = False
+
+    if cached is None:
+        # No cache at all. Start background fetch, tell client to poll.
+        pending = key not in _item_detail_inflight
+        asyncio.create_task(_background_fetch(name))
+        listings_raw: list[dict] = []
+        total_available = 0
+        listings_updated = ""
+    else:
+        listings_raw = cached["listings"][:limit]
+        total_available = cached["total"]
+        listings_updated = cached["cached_at"]
+        if cached.get("is_stale"):
+            # Return stale now, refresh in the background.
+            asyncio.create_task(_background_fetch(name))
+
+    listings = [
+        {
+            "id": lst["id"],
+            "price_usd": lst["price"],
+            "price_rub": round(lst["price"] * rate, 2),
+            "float": lst.get("float"),
+            "paint_index": lst.get("paint_index"),
+            "paint_seed": lst.get("paint_seed"),
+            "stickers": lst.get("stickers") or [],
+            "name_tag": lst.get("name_tag"),
+            "unlock_at": lst.get("unlock_at"),
+            "item_link": lst.get("item_link"),
+        }
+        for lst in listings_raw
+    ]
+
+    return {
+        "summary": summary,
+        "listings": listings,
+        "listings_total": total_available,
+        "listings_updated": listings_updated,
+        "pending": pending,
+        "is_stale": cached.get("is_stale", False) if cached else False,
+    }
+
+
 @app.get("/api/history/{name}")
 @beartype
 def get_history(name: str, tf: str = "7d") -> dict:
@@ -757,8 +1135,9 @@ def add_list_item_endpoint(body: ListItemRequest) -> JSONResponse | dict:
     """Add item to user's personal list (LIST-02)."""
     if body.list_type not in ("favorite", "wishlist"):
         return JSONResponse({"error": "list_type must be 'favorite' or 'wishlist'"}, status_code=400)
-    db.add_list_item(user_id=body.user, item_name=body.item_name, list_type=body.list_type)
-    return {"ok": True}
+    resolved_name = _resolve_item_name(body.item_name)
+    db.add_list_item(user_id=body.user, item_name=resolved_name, list_type=body.list_type)
+    return {"ok": True, "item_name": resolved_name}
 
 
 @app.delete("/api/lists")
@@ -766,6 +1145,14 @@ def add_list_item_endpoint(body: ListItemRequest) -> JSONResponse | dict:
 def remove_list_item_endpoint(body: ListItemRequest) -> dict:
     """Remove item from user's personal list (LIST-02)."""
     count = db.remove_list_item(user_id=body.user, item_name=body.item_name, list_type=body.list_type)
+    if count == 0:
+        resolved_name = _resolve_item_name(body.item_name)
+        if resolved_name != body.item_name:
+            count = db.remove_list_item(
+                user_id=body.user,
+                item_name=resolved_name,
+                list_type=body.list_type,
+            )
     return {"ok": True, "removed": count}
 
 
@@ -774,7 +1161,38 @@ def remove_list_item_endpoint(body: ListItemRequest) -> dict:
 def get_list_items_endpoint(user: str = Query(...), type: str | None = Query(default=None)) -> dict:
     """Return user's list items, optionally filtered by type (LIST-03)."""
     items = db.get_list_items(user_id=user, list_type=type)
-    return {"items": items}
+    enriched: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        original_name = item["item_name"]
+        name = _resolve_item_name(original_name)
+        if name != original_name:
+            db.rename_list_item(
+                user_id=user,
+                old_name=original_name,
+                new_name=name,
+                list_type=item["list_type"],
+            )
+            item = {**item, "item_name": name}
+
+        dedupe_key = (item["list_type"], name.lower())
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        item_data = _prices.get(name.lower())
+        enriched.append({
+            **item,
+            "image": _get_item_image(name),
+            "price_rub": (
+                round(item_data["price"] * _lis_rate(), 2)
+                if item_data else None
+            ),
+            "count": item_data["count"] if item_data else None,
+            "category": classify(name),
+            "url": item_data["url"] if item_data else "",
+        })
+    return {"items": enriched}
 
 
 if __name__ == "__main__":
