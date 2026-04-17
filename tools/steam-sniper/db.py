@@ -420,3 +420,10 @@ def get_list_items(user_id: str, list_type: str | None = None) -> list[dict]:
                 (user_id,),
             ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_all_list_names() -> set[str]:
+    """Return every item_name present in any user_list, regardless of user."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT DISTINCT item_name FROM user_lists").fetchall()
+    return {row[0] for row in rows}

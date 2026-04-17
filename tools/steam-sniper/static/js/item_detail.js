@@ -1,6 +1,7 @@
 import { fmtRub, fmtUsd } from './utils.js';
 
 const ENDPOINT = '/api/item/';
+const POLL_SCHEDULE_MS = [3000, 5000, 7000, 10000, 12000, 15000, 20000, 20000];
 
 function esc(s) {
   return (s == null ? '' : String(s))
@@ -36,15 +37,31 @@ function fmtUnlock(ts) {
   return 'трейдлок до ' + d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
 }
 
+function extractStateFlags(name) {
+  // StatTrak™ / Souvenir / ★ appear as prefixes in lis-skins names.
+  const flags = [];
+  if (!name) return flags;
+  if (name.includes('StatTrak')) flags.push({ label: 'StatTrak™', cls: 'state-stattrak' });
+  if (name.startsWith('Souvenir ') || name.includes(' Souvenir ')) {
+    flags.push({ label: 'Souvenir', cls: 'state-souvenir' });
+  }
+  if (name.startsWith('★')) flags.push({ label: '★', cls: 'state-knife' });
+  return flags;
+}
+
 function renderStickers(stickers) {
   if (!stickers || !stickers.length) return '';
   return '<div class="detail-stickers">' + stickers.map(st => {
-    const wear = st.wear && st.wear > 0 ? Math.round(st.wear * 100) + '%' : '';
-    const title = esc((st.name || '') + (wear ? ' · wear ' + wear : ''));
+    const wearNum = Number(st.wear);
+    const wearPct = Number.isFinite(wearNum) && wearNum > 0 ? Math.round(wearNum * 100) : null;
+    const title = esc((st.name || '') + (wearPct != null ? ' · wear ' + wearPct + '%' : ''));
     const img = st.image
       ? '<img src="' + esc(st.image) + '" alt="" loading="lazy">'
       : '<span class="sticker-ph">?</span>';
-    return '<span class="detail-sticker" title="' + title + '">' + img + '</span>';
+    const wearBadge = wearPct != null
+      ? '<span class="detail-sticker-wear">' + wearPct + '</span>'
+      : '';
+    return '<span class="detail-sticker" title="' + title + '">' + img + wearBadge + '</span>';
   }).join('') + '</div>';
 }
 
@@ -53,19 +70,28 @@ function renderListingRow(lst) {
   const wear = wearFromFloat(fl);
   const unlock = fmtUnlock(lst.unlock_at);
   const paint = (lst.paint_index != null || lst.paint_seed != null)
-    ? '<span class="detail-paint">P ' + (lst.paint_index ?? '—') + '/' + (lst.paint_seed ?? '—') + '</span>'
+    ? '<span class="detail-paint" title="Paint index / seed">P ' + (lst.paint_index ?? '—') + '/' + (lst.paint_seed ?? '—') + '</span>'
     : '';
   const inspect = lst.item_link
     ? '<a class="detail-inspect" href="' + esc(lst.item_link) + '" title="Steam inspect">inspect</a>'
     : '';
+  const nameTag = lst.name_tag
+    ? '<span class="detail-nametag" title="Именная бирка">' + esc(lst.name_tag) + '</span>'
+    : '';
+  const wearBadge = wear
+    ? '<span class="detail-wear detail-wear-' + wear.toLowerCase() + '">' + wear + '</span>'
+    : '';
+
   return '<div class="detail-listing">' +
     '<div class="detail-listing-price">' +
       '<span class="price-rub">' + fmtRub(lst.price_rub) + '</span>' +
       '<span class="price-usd">' + fmtUsd(lst.price_usd) + '</span>' +
     '</div>' +
     '<div class="detail-listing-meta">' +
-      (fl != null ? '<span class="detail-float" title="Float value">' + fmtFloat(fl) + (wear ? ' · ' + wear : '') + '</span>' : '') +
+      wearBadge +
+      (fl != null ? '<span class="detail-float" title="Float value">' + fmtFloat(fl) + '</span>' : '') +
       paint +
+      nameTag +
       (unlock ? '<span class="detail-unlock">' + esc(unlock) + '</span>' : '') +
     '</div>' +
     renderStickers(lst.stickers) +
@@ -73,7 +99,7 @@ function renderListingRow(lst) {
   '</div>';
 }
 
-function renderModal(data) {
+function renderModal(data, { polling } = {}) {
   const s = data.summary || {};
   const listings = data.listings || [];
   const total = data.listings_total || 0;
@@ -90,18 +116,42 @@ function renderModal(data) {
     ? '<a class="detail-open-lis" href="' + esc(s.url) + '" target="_blank" rel="noopener">открыть на lis-skins →</a>'
     : '';
 
-  const listingsHeader = listings.length
-    ? '<div class="detail-section-title">Листинги — ' + listings.length + ' из ' + total + '</div>'
-    : '<div class="detail-section-title detail-section-title-empty">Листинги ещё подгружаются…</div>';
+  const stateFlags = extractStateFlags(s.name);
+  const stateHtml = stateFlags.length
+    ? '<div class="detail-state-flags">' +
+        stateFlags.map(f => '<span class="detail-state ' + f.cls + '">' + esc(f.label) + '</span>').join('') +
+      '</div>'
+    : '';
 
-  const listingsBody = listings.length
-    ? listings.map(renderListingRow).join('')
-    : '<div class="detail-empty">Индекс листингов обновляется раз в 15 минут. Если только что стартовали — подожди пару минут и обнови.</div>';
+  const staleLabel = data.is_stale
+    ? '<span class="detail-stale" title="Показаны данные из старого кэша, новые подгружаются">stale</span>'
+    : '';
+
+  let listingsHeader;
+  if (listings.length) {
+    listingsHeader = '<div class="detail-section-title">Листинги — ' + listings.length + ' из ' + total + ' ' + staleLabel + '</div>';
+  } else if (polling || data.pending) {
+    listingsHeader = '<div class="detail-section-title detail-section-title-empty">Первый разбор lis-skins — до 30с…</div>';
+  } else {
+    listingsHeader = '<div class="detail-section-title detail-section-title-empty">Листинги</div>';
+  }
+
+  let listingsBody;
+  if (listings.length) {
+    listingsBody = listings.map(renderListingRow).join('');
+  } else if (polling || data.pending) {
+    listingsBody = '<div class="detail-loading-inline"><div class="spinner"></div><div>Тянем 30 МБ JSON через стрим, первое открытие самое долгое.</div></div>';
+  } else if (s.count === 0) {
+    listingsBody = '<div class="detail-empty">Сейчас нет предложений на lis-skins.</div>';
+  } else {
+    listingsBody = '<div class="detail-empty">Листингов пока нет — попробуй ещё раз через минуту.</div>';
+  }
 
   return '<div class="detail-header" style="border-left: 3px solid ' + esc(s.rarity_color || '#b0c3d9') + '">' +
       imgHtml +
       '<div class="detail-header-info">' +
         '<div class="detail-category">' + esc(s.category || '') + '</div>' +
+        stateHtml +
         '<h2 class="detail-name">' + esc(s.name || '') + '</h2>' +
         priceBlock +
         '<div class="detail-count">' + (s.count || 0) + ' на маркете</div>' +
@@ -118,6 +168,7 @@ let _currentName = null;
 let _overlay = null;
 let _body = null;
 let _closeBtn = null;
+let _pollTimer = null;
 
 function ensureModalNode() {
   if (_overlay) return;
@@ -126,25 +177,60 @@ function ensureModalNode() {
   _closeBtn = document.getElementById('itemDetailClose');
 }
 
+function cancelPolling() {
+  if (_pollTimer) {
+    clearTimeout(_pollTimer);
+    _pollTimer = null;
+  }
+}
+
 function closeModal() {
   if (!_overlay) return;
   _overlay.classList.remove('open');
   _currentName = null;
+  cancelPolling();
+}
+
+async function fetchDetail(name) {
+  const resp = await fetch(ENDPOINT + encodeURIComponent(name));
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp.json();
+}
+
+function scheduleNextPoll(name, attempt) {
+  if (attempt >= POLL_SCHEDULE_MS.length) return;
+  const delay = POLL_SCHEDULE_MS[attempt];
+  _pollTimer = setTimeout(async () => {
+    if (_currentName !== name) return;
+    try {
+      const data = await fetchDetail(name);
+      if (_currentName !== name) return;
+      _body.innerHTML = renderModal(data, { polling: data.pending || data.listings_total === 0 });
+      if (!data.listings || !data.listings.length) {
+        if (data.pending || data.listings_total === 0) {
+          scheduleNextPoll(name, attempt + 1);
+        }
+      }
+    } catch (err) {
+      console.error('item detail poll failed:', err);
+    }
+  }, delay);
 }
 
 async function openItemDetail(name) {
   if (!name) return;
   ensureModalNode();
   if (!_overlay || !_body) return;
+  cancelPolling();
   _currentName = name;
-  _body.innerHTML = '<div class="detail-loading">Грузим…</div>';
+  _body.innerHTML = '<div class="detail-loading"><div class="spinner"></div><div>Грузим…</div></div>';
   _overlay.classList.add('open');
   try {
-    const resp = await fetch(ENDPOINT + encodeURIComponent(name));
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    if (_currentName !== name) return; // user clicked another card while we waited
-    _body.innerHTML = renderModal(data);
+    const data = await fetchDetail(name);
+    if (_currentName !== name) return;
+    const polling = data.pending || (data.listings_total === 0 && (!data.listings || !data.listings.length));
+    _body.innerHTML = renderModal(data, { polling });
+    if (polling) scheduleNextPoll(name, 0);
   } catch (err) {
     console.error('item detail fetch failed:', err);
     if (_currentName !== name) return;
@@ -153,8 +239,6 @@ async function openItemDetail(name) {
 }
 
 function onGridClick(e) {
-  // Ignore clicks on existing buttons/links inside the card (favorite, wishlist,
-  // inline links), which should keep their original behavior.
   if (e.target.closest('button, a, input, select, textarea')) return;
   const card = e.target.closest('.cat-card');
   if (!card) return;
@@ -166,7 +250,6 @@ function onGridClick(e) {
 export function initItemDetail() {
   ensureModalNode();
 
-  // Delegate click handling for every grid that renders catalog-style cards.
   ['catalogGrid', 'casesGrid', 'favoritesGrid', 'wishlistGrid'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('click', onGridClick);

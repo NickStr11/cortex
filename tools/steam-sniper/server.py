@@ -52,6 +52,12 @@ _image_cache: dict[str, str] = {}  # {name_lower: image_url} from ByMykel API
 _usd_rub: float = 0.0
 _last_update: str = ""
 _collector_task: asyncio.Task | None = None
+_warm_task: asyncio.Task | None = None
+
+# Item-detail coordination
+_item_detail_inflight: set[str] = set()  # names with a fetch currently running
+_item_detail_seen: set[str] = set()  # every name ever requested this process
+_warm_interval_s: int = 600  # 10 minutes between warm passes
 
 
 # Lis-skins uses their own USD/RUB rate ≈ CBR × 1.034 (3.4% markup).
@@ -253,7 +259,13 @@ def _item_cache_path(name: str) -> Path:
     return ITEM_DETAIL_CACHE_DIR / f"{digest}.json"
 
 
-def _load_item_cache(name: str) -> dict | None:
+def _load_item_cache(name: str, *, accept_stale: bool = False) -> dict | None:
+    """Load the per-item cache.
+
+    accept_stale: when True, return the payload even if older than
+    LISTINGS_CACHE_TTL, annotating it with `is_stale`. Used by the
+    stale-while-revalidate response path.
+    """
     path = _item_cache_path(name)
     if not path.exists():
         return None
@@ -262,8 +274,11 @@ def _load_item_cache(name: str) -> dict | None:
         cached_at = datetime.fromisoformat(payload["cached_at"])
     except (OSError, ValueError, KeyError, json.JSONDecodeError):
         return None
-    if datetime.now(MSK) - cached_at > timedelta(seconds=LISTINGS_CACHE_TTL):
+    age = datetime.now(MSK) - cached_at
+    is_stale = age > timedelta(seconds=LISTINGS_CACHE_TTL)
+    if is_stale and not accept_stale:
         return None
+    payload["is_stale"] = is_stale
     return payload
 
 
@@ -304,6 +319,7 @@ def _slim_listing(it: dict) -> dict:
         "paint_index": _num(it.get("item_paint_index")),
         "paint_seed": _num(it.get("item_paint_seed")),
         "stickers": stickers,
+        "name_tag": it.get("name_tag"),
         "unlock_at": it.get("unlock_at"),
         "item_link": it.get("item_link"),
     }
@@ -340,6 +356,105 @@ def _get_item_listings(name: str, *, limit: int) -> tuple[list[dict], int, str]:
     if cached is None:
         cached = _fetch_item_listings(name)
     return cached["listings"][:limit], cached["total"], cached["cached_at"]
+
+
+def _warm_hot_names() -> set[str]:
+    """Names that should be kept warm: watchlist + all user_lists + recent clicks."""
+    hot = set()
+    try:
+        hot |= db.get_watchlist_names()
+    except Exception:
+        pass
+    try:
+        hot |= db.get_all_list_names()
+    except Exception:
+        pass
+    hot |= _item_detail_seen
+    return hot
+
+
+def _warm_pass(names: set[str], *, store_limit: int = 100) -> dict[str, int]:
+    """One streaming pass over api_csgo_full.json — write a cache file per hot name.
+
+    Skips names whose cache is still fresh (within LISTINGS_CACHE_TTL).
+    Returns {name_lower: total_listings_seen} for the names that got refreshed.
+    """
+    targets: set[str] = set()
+    for n in names:
+        cached = _load_item_cache(n)
+        if cached is None:  # missing or stale
+            targets.add(n.lower())
+    if not targets:
+        return {}
+
+    # name_lower -> {total, matched}
+    buckets: dict[str, dict] = {n: {"total": 0, "matched": []} for n in targets}
+    canonical: dict[str, str] = {}  # name_lower -> real display name seen in data
+
+    with _fetch_full_listings() as resp:
+        for it in ijson.items(resp, "items.item"):
+            item_name = it.get("name")
+            price = it.get("price")
+            if not item_name or price is None:
+                continue
+            key = item_name.lower()
+            bucket = buckets.get(key)
+            if bucket is None:
+                continue
+            bucket["total"] += 1
+            canonical.setdefault(key, item_name)
+            if len(bucket["matched"]) < store_limit:
+                bucket["matched"].append(_slim_listing(it))
+
+    now = datetime.now(MSK).isoformat(timespec="seconds")
+    counts: dict[str, int] = {}
+    for key, b in buckets.items():
+        b["matched"].sort(key=lambda x: x["price"])
+        payload = {
+            "cached_at": now,
+            "total": b["total"],
+            "listings": b["matched"],
+        }
+        _save_item_cache(canonical.get(key, key), payload)
+        counts[key] = b["total"]
+    return counts
+
+
+async def _warm_cache_once() -> None:
+    """Async wrapper: run one warm pass in a worker thread."""
+    hot = _warm_hot_names()
+    if not hot:
+        return
+    try:
+        counts = await asyncio.to_thread(_warm_pass, hot)
+    except Exception as e:
+        logger.warning("Warm cache pass failed: %s", e)
+        return
+    if counts:
+        logger.info("Warmed item-detail cache: %d names", len(counts))
+
+
+async def _warm_cache_loop() -> None:
+    while True:
+        await asyncio.sleep(_warm_interval_s)
+        try:
+            await _warm_cache_once()
+        except Exception as e:
+            logger.error("Warm cache loop error: %s", e)
+
+
+async def _background_fetch(name: str) -> None:
+    """Fetch a single item's listings in the background, dedup via _inflight."""
+    key = name.lower()
+    if key in _item_detail_inflight:
+        return
+    _item_detail_inflight.add(key)
+    try:
+        await asyncio.to_thread(_fetch_item_listings, name)
+    except Exception as e:
+        logger.warning("Background item fetch failed for %s: %s", name, e)
+    finally:
+        _item_detail_inflight.discard(key)
 
 
 def _fetch_usd_rub() -> float:
@@ -464,13 +579,19 @@ async def _collector_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """Startup: init db, first collect, start loop. Shutdown: cancel loop."""
-    global _collector_task, _image_cache
+    """Startup: init db, first collect, start loops. Shutdown: cancel loops."""
+    global _collector_task, _warm_task, _image_cache
     db.init_db()
     await _load_image_cache()
     await _collect_once()
     _collector_task = asyncio.create_task(_collector_loop())
+    # First warm pass in the background — don't block startup, but fill caches
+    # for watchlist/favorites/wishlist quickly so the user's first click is instant.
+    asyncio.create_task(_warm_cache_once())
+    _warm_task = asyncio.create_task(_warm_cache_loop())
     yield
+    if _warm_task:
+        _warm_task.cancel()
     if _collector_task:
         _collector_task.cancel()
 
@@ -899,14 +1020,18 @@ def get_catalog(
 
 @app.get("/api/item/{name}")
 @beartype
-def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> dict:
+async def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> dict:
     """Return detailed listings for a single skin — lis-skins item page mirror.
 
-    Body: summary (aggregated price/count/image/category) + up to `limit`
-    individual listings sorted by price (float, stickers, paint index).
+    Serving strategy:
+    - Fresh cache hit → return immediately.
+    - Stale cache hit → return stale, trigger background refresh (stale-while-revalidate).
+    - Cache miss → return `pending: true` immediately, start background fetch.
+      The frontend polls until `pending` is false.
     """
     rate = _lis_rate()
     key = name.lower()
+    _item_detail_seen.add(key)
 
     summary_src = _prices.get(key, {})
     summary = {
@@ -923,11 +1048,24 @@ def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> 
         "rarity_color": _rarity_color(summary_src.get("category")),
     }
 
-    try:
-        listings_raw, total_available, listings_updated = _get_item_listings(name, limit=limit)
-    except Exception as e:
-        logger.warning("Item detail stream fetch failed for %s: %s", name, e)
-        listings_raw, total_available, listings_updated = [], 0, ""
+    cached = _load_item_cache(name, accept_stale=True)
+    pending = False
+
+    if cached is None:
+        # No cache at all. Start background fetch, tell client to poll.
+        pending = key not in _item_detail_inflight
+        asyncio.create_task(_background_fetch(name))
+        listings_raw: list[dict] = []
+        total_available = 0
+        listings_updated = ""
+    else:
+        listings_raw = cached["listings"][:limit]
+        total_available = cached["total"]
+        listings_updated = cached["cached_at"]
+        if cached.get("is_stale"):
+            # Return stale now, refresh in the background.
+            asyncio.create_task(_background_fetch(name))
+
     listings = [
         {
             "id": lst["id"],
@@ -937,6 +1075,7 @@ def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> 
             "paint_index": lst.get("paint_index"),
             "paint_seed": lst.get("paint_seed"),
             "stickers": lst.get("stickers") or [],
+            "name_tag": lst.get("name_tag"),
             "unlock_at": lst.get("unlock_at"),
             "item_link": lst.get("item_link"),
         }
@@ -948,6 +1087,8 @@ def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> 
         "listings": listings,
         "listings_total": total_available,
         "listings_updated": listings_updated,
+        "pending": pending,
+        "is_stale": cached.get("is_stale", False) if cached else False,
     }
 
 
