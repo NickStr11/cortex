@@ -1,7 +1,7 @@
 // Steam Sniper -- Background service worker
 // Handles API calls to dashboard (content scripts can't fetch HTTP from HTTPS pages)
 
-const API_BASE = "http://194.87.140.204";
+const API_BASE = "http://72.56.37.150";
 const DEFAULT_USER = "lesha";
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
