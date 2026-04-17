@@ -1,7 +1,6 @@
 import { fmtRub, fmtUsd } from './utils.js';
 
 const ENDPOINT = '/api/item/';
-const POLL_SCHEDULE_MS = [3000, 5000, 7000, 10000, 12000, 15000, 20000, 20000];
 
 function esc(s) {
   return (s == null ? '' : String(s))
@@ -16,6 +15,19 @@ function fmtFloat(v) {
   if (v == null) return '—';
   const n = Number(v);
   return Number.isFinite(n) ? n.toFixed(6) : '—';
+}
+
+function fmtTs(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return esc(ts);
+  return d.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function wearFromFloat(f) {
@@ -38,7 +50,6 @@ function fmtUnlock(ts) {
 }
 
 function extractStateFlags(name) {
-  // StatTrak™ / Souvenir / ★ appear as prefixes in lis-skins names.
   const flags = [];
   if (!name) return flags;
   if (name.includes('StatTrak')) flags.push({ label: 'StatTrak™', cls: 'state-stattrak' });
@@ -99,10 +110,21 @@ function renderListingRow(lst) {
   '</div>';
 }
 
-function renderModal(data, { polling } = {}) {
+function renderSnapshotMeta(data) {
+  if (!data.snapshot_available) {
+    return '<div class="detail-empty">Локальный snapshot листингов ещё не собран на сервере.</div>';
+  }
+  if (data.snapshot_built_at) {
+    return '<div class="detail-section-title detail-section-title-empty">Snapshot: ' + esc(fmtTs(data.snapshot_built_at)) + '</div>';
+  }
+  return '';
+}
+
+function renderModal(data) {
   const s = data.summary || {};
   const listings = data.listings || [];
   const total = data.listings_total || 0;
+  const hasListings = listings.length > 0;
 
   const imgHtml = s.image
     ? '<img class="detail-img" src="' + esc(s.image) + '" alt="" loading="lazy">'
@@ -123,28 +145,21 @@ function renderModal(data, { polling } = {}) {
       '</div>'
     : '';
 
-  const staleLabel = data.is_stale
-    ? '<span class="detail-stale" title="Показаны данные из старого кэша, новые подгружаются">stale</span>'
-    : '';
-
-  let listingsHeader;
-  if (listings.length) {
-    listingsHeader = '<div class="detail-section-title">Листинги — ' + listings.length + ' из ' + total + ' ' + staleLabel + '</div>';
-  } else if (polling || data.pending) {
-    listingsHeader = '<div class="detail-section-title detail-section-title-empty">Первый разбор lis-skins — до 30с…</div>';
-  } else {
-    listingsHeader = '<div class="detail-section-title detail-section-title-empty">Листинги</div>';
+  let listingsHeader = '<div class="detail-section-title">Листинги</div>';
+  if (hasListings) {
+    const suffix = data.listings_updated ? ' · обновлён ' + esc(fmtTs(data.listings_updated)) : '';
+    listingsHeader = '<div class="detail-section-title">Листинги — ' + listings.length + ' из ' + total + suffix + '</div>';
   }
 
   let listingsBody;
-  if (listings.length) {
+  if (hasListings) {
     listingsBody = listings.map(renderListingRow).join('');
-  } else if (polling || data.pending) {
-    listingsBody = '<div class="detail-loading-inline"><div class="spinner"></div><div>Тянем 30 МБ JSON через стрим, первое открытие самое долгое.</div></div>';
+  } else if (!data.snapshot_available) {
+    listingsBody = '<div class="detail-empty">Snapshot листингов пока не загружен на VPS. Сначала собери и залей `listings_snapshot.db`.</div>';
   } else if (s.count === 0) {
     listingsBody = '<div class="detail-empty">Сейчас нет предложений на lis-skins.</div>';
   } else {
-    listingsBody = '<div class="detail-empty">Листингов пока нет — попробуй ещё раз через минуту.</div>';
+    listingsBody = '<div class="detail-empty">В текущем snapshot нет листингов для этого предмета.</div>';
   }
 
   return '<div class="detail-header" style="border-left: 3px solid ' + esc(s.rarity_color || '#b0c3d9') + '">' +
@@ -159,6 +174,7 @@ function renderModal(data, { polling } = {}) {
       '</div>' +
     '</div>' +
     '<div class="detail-listings">' +
+      renderSnapshotMeta(data) +
       listingsHeader +
       listingsBody +
     '</div>';
@@ -168,7 +184,6 @@ let _currentName = null;
 let _overlay = null;
 let _body = null;
 let _closeBtn = null;
-let _pollTimer = null;
 
 function ensureModalNode() {
   if (_overlay) return;
@@ -177,18 +192,10 @@ function ensureModalNode() {
   _closeBtn = document.getElementById('itemDetailClose');
 }
 
-function cancelPolling() {
-  if (_pollTimer) {
-    clearTimeout(_pollTimer);
-    _pollTimer = null;
-  }
-}
-
 function closeModal() {
   if (!_overlay) return;
   _overlay.classList.remove('open');
   _currentName = null;
-  cancelPolling();
 }
 
 async function fetchDetail(name) {
@@ -197,40 +204,17 @@ async function fetchDetail(name) {
   return resp.json();
 }
 
-function scheduleNextPoll(name, attempt) {
-  if (attempt >= POLL_SCHEDULE_MS.length) return;
-  const delay = POLL_SCHEDULE_MS[attempt];
-  _pollTimer = setTimeout(async () => {
-    if (_currentName !== name) return;
-    try {
-      const data = await fetchDetail(name);
-      if (_currentName !== name) return;
-      _body.innerHTML = renderModal(data, { polling: data.pending || data.listings_total === 0 });
-      if (!data.listings || !data.listings.length) {
-        if (data.pending || data.listings_total === 0) {
-          scheduleNextPoll(name, attempt + 1);
-        }
-      }
-    } catch (err) {
-      console.error('item detail poll failed:', err);
-    }
-  }, delay);
-}
-
 async function openItemDetail(name) {
   if (!name) return;
   ensureModalNode();
   if (!_overlay || !_body) return;
-  cancelPolling();
   _currentName = name;
   _body.innerHTML = '<div class="detail-loading"><div class="spinner"></div><div>Грузим…</div></div>';
   _overlay.classList.add('open');
   try {
     const data = await fetchDetail(name);
     if (_currentName !== name) return;
-    const polling = data.pending || (data.listings_total === 0 && (!data.listings || !data.listings.length));
-    _body.innerHTML = renderModal(data, { polling });
-    if (polling) scheduleNextPoll(name, 0);
+    _body.innerHTML = renderModal(data);
   } catch (err) {
     console.error('item detail fetch failed:', err);
     if (_currentName !== name) return;

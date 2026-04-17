@@ -31,6 +31,7 @@ SERVICE_BOT = "steam-sniper-bot"
 PROJECT_FILES = [
     "server.py",
     "build_image_cache.py",
+    "listings_snapshot.py",
     "main.py",
     "db.py",
     "category.py",
@@ -42,6 +43,7 @@ PROJECT_FILES = [
 # Optional data files to upload when present.
 OPTIONAL_DATA_FILES = [
     "data/image_cache.json",
+    "data/listings_snapshot.db",
 ]
 
 # Static directories to upload recursively

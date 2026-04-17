@@ -294,10 +294,10 @@ def test_history_empty(client) -> None:
 
 
 def test_item_detail_uses_streamed_listing_data(client, monkeypatch) -> None:
-    """GET /api/item should format streamed listing data into UI payload."""
+    """GET /api/item should format snapshot listing data into UI payload."""
     import server
 
-    monkeypatch.setattr(server, "_get_item_listings", lambda _name, limit: ([
+    monkeypatch.setattr(server, "snapshot_get_item_listings", lambda _name, limit: ([
         {
             "id": 123,
             "price": 25.4,
@@ -309,6 +309,11 @@ def test_item_detail_uses_streamed_listing_data(client, monkeypatch) -> None:
             "item_link": "steam://inspect/123",
         }
     ][:limit], 1, "2026-04-17T08:00:00+03:00"))
+    monkeypatch.setattr(server, "snapshot_status", lambda: {
+        "available": True,
+        "built_at": "2026-04-17T08:05:00+03:00",
+        "size_bytes": 123456,
+    })
 
     resp = client.get("/api/item/AWP%20%7C%20Asiimov%20%28Field-Tested%29")
     assert resp.status_code == 200
@@ -317,6 +322,8 @@ def test_item_detail_uses_streamed_listing_data(client, monkeypatch) -> None:
     assert data["summary"]["image"] == "https://images.example/asiimov.png"
     assert data["listings_total"] == 1
     assert data["listings_updated"] == "2026-04-17T08:00:00+03:00"
+    assert data["snapshot_available"] is True
+    assert data["snapshot_built_at"] == "2026-04-17T08:05:00+03:00"
     assert data["listings"][0]["id"] == 123
     assert data["listings"][0]["price_usd"] == 25.4
     assert data["listings"][0]["item_link"] == "steam://inspect/123"
