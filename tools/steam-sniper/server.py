@@ -275,14 +275,35 @@ def _save_item_cache(name: str, payload: dict) -> None:
     )
 
 
+def _num(v):
+    """Coerce ijson numerics (Decimal) and strings into JSON-safe primitives."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return v
+    return int(f) if f.is_integer() else f
+
+
 def _slim_listing(it: dict) -> dict:
+    stickers_raw = it.get("stickers") or []
+    stickers = [
+        {
+            "name": s.get("name"),
+            "image": s.get("image"),
+            "wear": _num(s.get("wear")),
+            "slot": _num(s.get("slot")),
+        }
+        for s in stickers_raw
+    ]
     return {
-        "id": it.get("id"),
+        "id": _num(it.get("id")),
         "price": float(it["price"]),
-        "float": it.get("item_float"),
-        "paint_index": it.get("item_paint_index"),
-        "paint_seed": it.get("item_paint_seed"),
-        "stickers": it.get("stickers") or [],
+        "float": str(it["item_float"]) if it.get("item_float") is not None else None,
+        "paint_index": _num(it.get("item_paint_index")),
+        "paint_seed": _num(it.get("item_paint_seed")),
+        "stickers": stickers,
         "unlock_at": it.get("unlock_at"),
         "item_link": it.get("item_link"),
     }
