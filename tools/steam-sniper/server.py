@@ -6,6 +6,7 @@ Background collector fetches lis-skins prices every 5 minutes.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -21,8 +22,10 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+import ijson
 from pydantic import BaseModel
 
+from build_image_cache import ensure_image_cache, load_image_cache
 import db
 from category import classify
 
@@ -34,8 +37,11 @@ logger = logging.getLogger("sniper.server")
 # --- Constants ---
 
 LISSKINS_URL = "https://lis-skins.com/market_export_json/csgo.json"
+LISSKINS_FULL_URL = "https://lis-skins.com/market_export_json/api_csgo_full.json"
 CBR_URL = "https://www.cbr-xml-daily.ru/daily_json.js"
 COLLECT_INTERVAL = 300  # 5 minutes
+LISTINGS_CACHE_TTL = 900  # 15 minutes
+ITEM_DETAIL_CACHE_DIR = Path(__file__).parent / "data" / "item_detail_cache"
 MSK = timezone(timedelta(hours=3))
 
 # --- Module-level state ---
@@ -65,6 +71,14 @@ def _fetch_lis_skins() -> list[dict]:
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _fetch_full_listings() -> list[dict]:
+    """Yield the raw lis-skins full-listing stream."""
+    req = urllib.request.Request(
+        LISSKINS_FULL_URL, headers={"User-Agent": "SteamSniper/1.0"}
+    )
+    return urllib.request.urlopen(req, timeout=120)
 
 
 _WEAR_RE = re.compile(r"\s*\((Factory New|Minimal Wear|Field-Tested|Well-Worn|Battle-Scarred)\)$")
@@ -195,11 +209,116 @@ def _get_item_image(name: str) -> str:
 
 def _load_image_cache_from_file() -> dict[str, str]:
     """Load pre-built image cache from data/image_cache.json."""
-    cache_path = Path(__file__).parent / "data" / "image_cache.json"
-    if cache_path.exists():
-        with open(cache_path) as f:
-            return json.loads(f.read())
-    return {}
+    return load_image_cache()
+
+
+def _fix_mojibake(text: str) -> str:
+    """Recover UTF-8 Cyrillic that was mis-decoded as latin-1/cp1252."""
+    if not text or not any(marker in text for marker in ("Ð", "Ñ", "â", "€", "™")):
+        return text
+
+    for encoding in ("latin-1", "cp1252"):
+        try:
+            decoded = text.encode(encoding).decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        if any("\u0400" <= ch <= "\u04ff" for ch in decoded):
+            return decoded
+    return text
+
+
+def _match_catalog_name(query: str) -> str | None:
+    """Return canonical lis-skins name for an unambiguous search query."""
+    words = query.lower().split()
+    if not words:
+        return None
+
+    matches = [
+        item["name"]
+        for name_lower, item in _prices.items()
+        if all(word in name_lower for word in words)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _normalize_spaces(text: str) -> str:
+    """Collapse only real whitespace, without touching mojibake control bytes."""
+    return re.sub(r"[ \t\r\n\f\v]+", " ", text).strip()
+
+
+def _item_cache_path(name: str) -> Path:
+    digest = hashlib.sha1(name.lower().encode("utf-8")).hexdigest()
+    return ITEM_DETAIL_CACHE_DIR / f"{digest}.json"
+
+
+def _load_item_cache(name: str) -> dict | None:
+    path = _item_cache_path(name)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        cached_at = datetime.fromisoformat(payload["cached_at"])
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        return None
+    if datetime.now(MSK) - cached_at > timedelta(seconds=LISTINGS_CACHE_TTL):
+        return None
+    return payload
+
+
+def _save_item_cache(name: str, payload: dict) -> None:
+    ITEM_DETAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _item_cache_path(name).write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _slim_listing(it: dict) -> dict:
+    return {
+        "id": it.get("id"),
+        "price": float(it["price"]),
+        "float": it.get("item_float"),
+        "paint_index": it.get("item_paint_index"),
+        "paint_seed": it.get("item_paint_seed"),
+        "stickers": it.get("stickers") or [],
+        "unlock_at": it.get("unlock_at"),
+        "item_link": it.get("item_link"),
+    }
+
+
+def _fetch_item_listings(name: str, *, store_limit: int = 100) -> dict:
+    """Stream lis-skins full export and keep only one item's listings in memory."""
+    target = name.lower()
+    matched: list[dict] = []
+    total = 0
+
+    with _fetch_full_listings() as resp:
+        for it in ijson.items(resp, "items.item"):
+            item_name = it.get("name")
+            price = it.get("price")
+            if not item_name or price is None or item_name.lower() != target:
+                continue
+            total += 1
+            if len(matched) < store_limit:
+                matched.append(_slim_listing(it))
+
+    matched.sort(key=lambda x: x["price"])
+    payload = {
+        "cached_at": datetime.now(MSK).isoformat(timespec="seconds"),
+        "total": total,
+        "listings": matched,
+    }
+    _save_item_cache(name, payload)
+    return payload
+
+
+def _get_item_listings(name: str, *, limit: int) -> tuple[list[dict], int, str]:
+    cached = _load_item_cache(name)
+    if cached is None:
+        cached = _fetch_item_listings(name)
+    return cached["listings"][:limit], cached["total"], cached["cached_at"]
 
 
 def _fetch_usd_rub() -> float:
@@ -246,13 +365,21 @@ def _calc_trend(name_lower: str) -> dict:
 
 
 async def _load_image_cache() -> None:
-    """Load item images from local file (fast, no network)."""
+    """Ensure image cache exists locally and load it into memory."""
     global _image_cache
     try:
-        _image_cache = await asyncio.to_thread(_load_image_cache_from_file)
-        logger.info("Image cache loaded: %d items", len(_image_cache))
+        _image_cache = await asyncio.to_thread(ensure_image_cache)
+        logger.info("Image cache ready: %d items", len(_image_cache))
     except Exception as e:
-        logger.warning("Image cache load failed: %s", e)
+        _image_cache = load_image_cache()
+        if _image_cache:
+            logger.warning(
+                "Image cache refresh failed, using local cache (%d items): %s",
+                len(_image_cache),
+                e,
+            )
+        else:
+            logger.warning("Image cache unavailable: %s", e)
 
 
 async def _collect_once() -> None:
@@ -319,9 +446,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Startup: init db, first collect, start loop. Shutdown: cancel loop."""
     global _collector_task, _image_cache
     db.init_db()
-    # Load image cache immediately (local file, fast)
-    _image_cache = _load_image_cache_from_file()
-    print(f"[STARTUP] Image cache loaded: {len(_image_cache)} items")
+    await _load_image_cache()
     await _collect_once()
     _collector_task = asyncio.create_task(_collector_loop())
     yield
@@ -477,7 +602,7 @@ def get_watchlist() -> dict:
                 "count": item_data["count"] if item_data else None,
                 "url": item_data["url"] if item_data else None,
                 "steam_url": steam_url,
-                "image_url": entry.get("image_url"),
+                "image_url": entry.get("image_url") or _get_item_image(entry["name"]),
                 "rarity_color": _rarity_color(entry.get("category")),
                 "added_at": entry.get("added_at", ""),
             }
@@ -502,7 +627,7 @@ def add_to_watchlist(body: WatchlistAddRequest) -> dict:
         qty=body.qty,
         display_name=body.display_name,
         category=body.category,
-        image_url=body.image_url,
+        image_url=body.image_url or _get_item_image(body.name),
     )
     return {"ok": True, "name": body.name}
 
@@ -565,6 +690,43 @@ def _steam_search(q: str) -> list[dict]:
     return results
 
 
+def _resolve_item_name(name: str) -> str:
+    """Normalize list item names to canonical lis-skins English names."""
+    raw = name.strip()
+    if not raw:
+        return name
+
+    for exact_candidate in (raw, _normalize_spaces(raw)):
+        item = _prices.get(exact_candidate.lower())
+        if item:
+            return item["name"]
+
+    candidates = [raw]
+    fixed = _fix_mojibake(raw)
+    if fixed != raw:
+        candidates.append(fixed)
+
+    for candidate in candidates:
+        candidate = _normalize_spaces(candidate)
+        item = _prices.get(candidate.lower())
+        if item:
+            return item["name"]
+
+        if any("\u0400" <= c <= "\u04ff" for c in candidate):
+            for steam_item in _steam_search(candidate):
+                lis_item = _prices.get(steam_item["hash_name"].lower())
+                if lis_item:
+                    return lis_item["name"]
+
+            en_query = _translate_ru_to_en(candidate)
+            if en_query:
+                matched = _match_catalog_name(en_query)
+                if matched:
+                    return matched
+
+    return raw
+
+
 @app.get("/api/search")
 @beartype
 def search_items(q: str = Query(min_length=2)) -> dict:
@@ -587,7 +749,7 @@ def search_items(q: str = Query(min_length=2)) -> dict:
                 "name": si["hash_name"],
                 "name_ru": si["name_ru"],
                 "type_ru": si["type_ru"],
-                "image": si["image"],
+                "image": si["image"] or _get_item_image(si["hash_name"]),
                 "name_color": si["name_color"],
                 "price": lis_item["price"] if lis_item else None,
                 "price_rub": (
@@ -611,7 +773,7 @@ def search_items(q: str = Query(min_length=2)) -> dict:
                 "name": item["name"],
                 "name_ru": "",
                 "type_ru": "",
-                "image": "",
+                "image": _get_item_image(item["name"]),
                 "name_color": "",
                 "price": item["price"],
                 "price_rub": round(item["price"] * _lis_rate(), 2),
@@ -714,6 +876,60 @@ def get_catalog(
     }
 
 
+@app.get("/api/item/{name}")
+@beartype
+def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> dict:
+    """Return detailed listings for a single skin — lis-skins item page mirror.
+
+    Body: summary (aggregated price/count/image/category) + up to `limit`
+    individual listings sorted by price (float, stickers, paint index).
+    """
+    rate = _lis_rate()
+    key = name.lower()
+
+    summary_src = _prices.get(key, {})
+    summary = {
+        "name": summary_src.get("name", name),
+        "url": summary_src.get("url", ""),
+        "count": summary_src.get("count", 0),
+        "price_usd": summary_src.get("price"),
+        "price_rub": (
+            round(summary_src["price"] * rate, 2)
+            if summary_src.get("price") is not None else None
+        ),
+        "image": _get_item_image(summary_src.get("name", name)),
+        "category": classify(summary_src.get("name", name)) if summary_src else "",
+        "rarity_color": _rarity_color(summary_src.get("category")),
+    }
+
+    try:
+        listings_raw, total_available, listings_updated = _get_item_listings(name, limit=limit)
+    except Exception as e:
+        logger.warning("Item detail stream fetch failed for %s: %s", name, e)
+        listings_raw, total_available, listings_updated = [], 0, ""
+    listings = [
+        {
+            "id": lst["id"],
+            "price_usd": lst["price"],
+            "price_rub": round(lst["price"] * rate, 2),
+            "float": lst.get("float"),
+            "paint_index": lst.get("paint_index"),
+            "paint_seed": lst.get("paint_seed"),
+            "stickers": lst.get("stickers") or [],
+            "unlock_at": lst.get("unlock_at"),
+            "item_link": lst.get("item_link"),
+        }
+        for lst in listings_raw
+    ]
+
+    return {
+        "summary": summary,
+        "listings": listings,
+        "listings_total": total_available,
+        "listings_updated": listings_updated,
+    }
+
+
 @app.get("/api/history/{name}")
 @beartype
 def get_history(name: str, tf: str = "7d") -> dict:
@@ -757,8 +973,9 @@ def add_list_item_endpoint(body: ListItemRequest) -> JSONResponse | dict:
     """Add item to user's personal list (LIST-02)."""
     if body.list_type not in ("favorite", "wishlist"):
         return JSONResponse({"error": "list_type must be 'favorite' or 'wishlist'"}, status_code=400)
-    db.add_list_item(user_id=body.user, item_name=body.item_name, list_type=body.list_type)
-    return {"ok": True}
+    resolved_name = _resolve_item_name(body.item_name)
+    db.add_list_item(user_id=body.user, item_name=resolved_name, list_type=body.list_type)
+    return {"ok": True, "item_name": resolved_name}
 
 
 @app.delete("/api/lists")
@@ -766,6 +983,14 @@ def add_list_item_endpoint(body: ListItemRequest) -> JSONResponse | dict:
 def remove_list_item_endpoint(body: ListItemRequest) -> dict:
     """Remove item from user's personal list (LIST-02)."""
     count = db.remove_list_item(user_id=body.user, item_name=body.item_name, list_type=body.list_type)
+    if count == 0:
+        resolved_name = _resolve_item_name(body.item_name)
+        if resolved_name != body.item_name:
+            count = db.remove_list_item(
+                user_id=body.user,
+                item_name=resolved_name,
+                list_type=body.list_type,
+            )
     return {"ok": True, "removed": count}
 
 
@@ -774,7 +999,38 @@ def remove_list_item_endpoint(body: ListItemRequest) -> dict:
 def get_list_items_endpoint(user: str = Query(...), type: str | None = Query(default=None)) -> dict:
     """Return user's list items, optionally filtered by type (LIST-03)."""
     items = db.get_list_items(user_id=user, list_type=type)
-    return {"items": items}
+    enriched: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        original_name = item["item_name"]
+        name = _resolve_item_name(original_name)
+        if name != original_name:
+            db.rename_list_item(
+                user_id=user,
+                old_name=original_name,
+                new_name=name,
+                list_type=item["list_type"],
+            )
+            item = {**item, "item_name": name}
+
+        dedupe_key = (item["list_type"], name.lower())
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        item_data = _prices.get(name.lower())
+        enriched.append({
+            **item,
+            "image": _get_item_image(name),
+            "price_rub": (
+                round(item_data["price"] * _lis_rate(), 2)
+                if item_data else None
+            ),
+            "count": item_data["count"] if item_data else None,
+            "category": classify(name),
+            "url": item_data["url"] if item_data else "",
+        })
+    return {"items": enriched}
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import { initModal } from './modal.js';
 import { initCatalog } from './catalog.js';
 import { initCases } from './cases.js';
 import { initLists, loadUserLists, updateCardIndicators } from './lists.js';
+import { initItemDetail } from './item_detail.js';
 import { initRouter } from './router.js';
 
 async function init() {
@@ -19,6 +20,7 @@ async function init() {
   initCatalog();
   initCases();
   initLists();
+  initItemDetail();
 
   // Load initial data
   await Promise.all([loadStats(), loadWatchlist(), loadAlerts(), loadUserLists()]);

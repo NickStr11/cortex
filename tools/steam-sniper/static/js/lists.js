@@ -8,6 +8,8 @@ const USER = 'lesha';
 // In-memory sets for O(1) lookup
 let _favorites = new Set();
 let _wishlist = new Set();
+let _favoriteItems = [];
+let _wishlistItems = [];
 
 // Price cache: populated by catalog.js after each loadCatalog
 let _priceCache = new Map(); // name -> { price_rub, url, category, count, name }
@@ -46,6 +48,8 @@ export async function loadUserLists() {
 
     _favorites = new Set(favData.items.map(i => i.item_name));
     _wishlist = new Set(wishData.items.map(i => i.item_name));
+    _favoriteItems = favData.items || [];
+    _wishlistItems = wishData.items || [];
 
     events.emit('lists:loaded');
   } catch (e) {
@@ -116,6 +120,7 @@ async function toggleListItem(itemName, listType) {
         body: JSON.stringify({ user: USER, item_name: itemName, list_type: listType }),
       });
     }
+    await loadUserLists();
   } catch (e) {
     // Revert on error
     console.error('toggleListItem:', e);
@@ -135,9 +140,9 @@ function renderListTab(listType, containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  const items = listType === 'favorite' ? _favorites : _wishlist;
+  const items = listType === 'favorite' ? _favoriteItems : _wishlistItems;
 
-  if (items.size === 0) {
+  if (items.length === 0) {
     const msg = listType === 'favorite'
       ? 'No favorites yet -- click \u2661 on catalog cards'
       : 'Wishlist is empty -- click \u2606 on catalog cards';
@@ -146,20 +151,20 @@ function renderListTab(listType, containerId) {
   }
 
   const title = listType === 'favorite' ? 'Favorites' : 'Wishlist';
-  let html = `<div class="list-tab-header"><span class="section-title">${title} <span class="badge">${items.size}</span></span></div>`;
+  let html = `<div class="list-tab-header"><span class="section-title">${title} <span class="badge">${items.length}</span></span></div>`;
   html += '<div class="list-tab-grid">';
 
-  for (const name of items) {
+  for (const item of items) {
+    const name = item.item_name;
     const cached = _priceCache.get(name);
-    const imgSrc = cached && cached.url
-      ? 'https://community.akamai.steamstatic.com/economy/image/' + cached.url + '/200fx200f'
-      : '';
+    const merged = cached ? { ...item, ...cached } : item;
+    const imgSrc = merged.image || '';
     const imgHtml = imgSrc
       ? `<img class="cat-card-img" src="${imgSrc}" loading="lazy" alt="">`
       : '<div class="cat-card-img-empty"></div>';
-    const price = cached ? fmtRub(cached.price_rub) : '--';
-    const catBadge = cached ? cached.category : '';
-    const count = cached ? cached.count : '?';
+    const price = merged.price_rub != null ? fmtRub(merged.price_rub) : '--';
+    const catBadge = merged.category || '';
+    const count = merged.count ?? '?';
     const safeName = name.replace(/"/g, '&quot;');
 
     html += `<div class="cat-card" data-item-name="${safeName}">

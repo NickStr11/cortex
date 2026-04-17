@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sniper-v2';
+const CACHE_NAME = 'sniper-v3';
 const STATIC_ASSETS = [
   '/static/css/styles.css',
   '/static/js/main.js',
@@ -38,20 +38,20 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch: cache-first for static, network-first for HTML/API
+// Fetch: network-first for static/HTML/API, fall back to cache offline.
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Static assets: cache-first
+  // Static assets: network-first to avoid stale JS after deploys.
   if (url.pathname.startsWith('/static/')) {
     event.respondWith(
-      caches.match(event.request).then((cached) =>
-        cached || fetch(event.request).then((response) => {
+      fetch(event.request)
+        .then((response) => {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           return response;
         })
-      )
+        .catch(() => caches.match(event.request))
     );
     return;
   }

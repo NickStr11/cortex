@@ -2,12 +2,13 @@
 
 Usage: cd tools/steam-sniper && uv run python deploy.py
 
-Connects to VPS 194.87.140.204, uploads project files to /opt/steam-sniper/,
+Connects to VPS 72.56.37.150, uploads project files to /opt/steam-sniper/,
 installs dependencies via uv, writes systemd units, sets up nginx, enables+starts services.
 """
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import paramiko
@@ -29,12 +30,18 @@ SERVICE_BOT = "steam-sniper-bot"
 # Project files to upload (relative to this script's directory)
 PROJECT_FILES = [
     "server.py",
+    "build_image_cache.py",
     "main.py",
     "db.py",
     "category.py",
     "dashboard.html",
     "pyproject.toml",
     ".env",
+]
+
+# Optional data files to upload when present.
+OPTIONAL_DATA_FILES = [
+    "data/image_cache.json",
 ]
 
 # Static directories to upload recursively
@@ -77,9 +84,6 @@ def run(client: paramiko.SSHClient, cmd: str, *, step: str = "") -> str:
 
 def connect() -> paramiko.SSHClient:
     """Connect to VPS using SSH keys."""
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
     # Try default key locations
     key_paths = [
         Path.home() / ".ssh" / "vps_key",
@@ -103,23 +107,46 @@ def connect() -> paramiko.SSHClient:
                     continue
 
     print(f"\n[1/10] Connecting to {VPS_USER}@{VPS_HOST}...")
-    try:
-        client.connect(
-            VPS_HOST,
-            username=VPS_USER,
-            pkey=pkey,
-            look_for_keys=True,
-            timeout=15,
-        )
-    except paramiko.AuthenticationException:
-        import getpass
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            client.connect(
+                VPS_HOST,
+                username=VPS_USER,
+                pkey=pkey,
+                look_for_keys=True,
+                timeout=15,
+                banner_timeout=30,
+                auth_timeout=30,
+            )
+            print("  Connected.")
+            return client
+        except paramiko.AuthenticationException:
+            import getpass
 
-        print("  SSH key auth failed. Enter credentials:")
-        cred = getpass.getpass(f"  Passphrase for {VPS_USER}@{VPS_HOST}: ")
-        client.connect(VPS_HOST, username=VPS_USER, password=cred, timeout=15)
+            print("  SSH key auth failed. Enter credentials:")
+            cred = getpass.getpass(f"  Passphrase for {VPS_USER}@{VPS_HOST}: ")
+            client.connect(
+                VPS_HOST,
+                username=VPS_USER,
+                password=cred,
+                timeout=15,
+                banner_timeout=30,
+                auth_timeout=30,
+            )
+            print("  Connected.")
+            return client
+        except Exception as exc:
+            last_error = exc
+            client.close()
+            if attempt == 3:
+                break
+            print(f"  Connect attempt {attempt}/3 failed: {exc}")
+            time.sleep(2)
 
-    print("  Connected.")
-    return client
+    raise RuntimeError(f"SSH connect failed after 3 attempts: {last_error}")
 
 
 def _ensure_remote_dir(sftp: paramiko.SFTPClient, path: str) -> None:
@@ -158,6 +185,20 @@ def upload_files(client: paramiko.SSHClient) -> None:
             print(f"  WARNING: {local_path} not found, skipping")
             continue
         remote_path = f"{REMOTE_DIR}/{filename}"
+        remote_dir = remote_path.rsplit("/", 1)[0]
+        _ensure_remote_dir(sftp, remote_dir)
+        sftp.put(str(local_path), remote_path)
+        print(f"  {filename} -> {remote_path}")
+
+    print("\n[4.5/10] Uploading optional data files...")
+    for filename in OPTIONAL_DATA_FILES:
+        local_path = local_root / filename
+        if not local_path.exists():
+            print(f"  WARNING: {local_path} not found, skipping")
+            continue
+        remote_path = f"{REMOTE_DIR}/{filename}"
+        remote_dir = remote_path.rsplit("/", 1)[0]
+        _ensure_remote_dir(sftp, remote_dir)
         sftp.put(str(local_path), remote_path)
         print(f"  {filename} -> {remote_path}")
 
@@ -276,13 +317,14 @@ def main() -> None:
         print("\n" + "=" * 50)
         print("  Deploy complete!")
         print("=" * 50)
-        print(f"\n  Dashboard:  http://{VPS_HOST}:8100")
+        print(f"\n  Dashboard:  http://{VPS_HOST}/")
+        print(f"  Direct app: http://{VPS_HOST}:8100")
         print(f"  Dashboard:  {dash_status}")
         print(f"  Bot:        {bot_status}")
 
         print("\n  HTTPS setup (when domain ready):")
-        print("    1. Register subdomain at duckdns.org -> point to 194.87.140.204")
-        print("    2. SSH to VPS: ssh root@194.87.140.204")
+        print(f"    1. Register subdomain at duckdns.org -> point to {VPS_HOST}")
+        print(f"    2. SSH to VPS: ssh root@{VPS_HOST}")
         print("    3. Run: certbot --nginx -d YOUR_SUBDOMAIN.duckdns.org")
         print("    4. Edit /etc/nginx/sites-available/steam-sniper:")
         print("       - Uncomment HTTPS server block")
