@@ -1,8 +1,8 @@
 Синтезируй паттерны из дневниковых записей в правила.
 
-1. Прочитай все файлы в `~/.claude/projects/D--code-2026-2-cortex/memory/diary/`
+1. Прочитай все файлы в `memory/diary/` (в корне репо)
 2. Прочитай текущий `CLAUDE.md`
-3. Прочитай `~/.claude/projects/D--code-2026-2-cortex/memory/reflections/processed.log` (если есть) — пропусти уже обработанные
+3. Прочитай `memory/reflections/processed.log` (в `~/.claude/projects/D--code-2026-2-cortex/memory/reflections/` — пока индекс и reflections живут там) — пропусти уже обработанные
 
 4. Найди паттерны в необработанных записях:
 
@@ -21,7 +21,7 @@
    **E. Эффективные workflow**
    - Что экономит время
 
-5. Создай рефлексию: `~/.claude/projects/D--code-2026-2-cortex/memory/reflections/YYYY-MM-reflection-N.md`
+5. Создай рефлексию: `~/.claude/projects/D--code-2026-2-cortex/memory/reflections/YYYY-MM-reflection-N.md` (пока reflections живут там)
 
 6. Обнови `CLAUDE.md`:
    - Новые правила — краткие, императивные, одна строка

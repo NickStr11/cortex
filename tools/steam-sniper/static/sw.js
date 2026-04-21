@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sniper-v3';
+const CACHE_NAME = 'sniper-v5';
 const STATIC_ASSETS = [
   '/static/css/styles.css',
   '/static/js/main.js',
@@ -15,6 +15,8 @@ const STATIC_ASSETS = [
   '/static/js/events.js',
   '/static/js/utils.js',
   '/static/js/state.js',
+  '/static/js/item_detail.js',
+  '/static/js/theme.js',
   '/static/icons/icon-192.png',
   '/static/icons/icon-512.png',
   '/static/manifest.json',

@@ -3,13 +3,14 @@
 
 ## Фокус
 - **Steam Sniper v2.3** — price alerts развёрнуто: Chrome extension v1.2 с inline 🔴/🟢 формой, backend-алерты (Codex закончил всё по брифу). На проде http://72.56.37.150/. Ждём Лёху чтобы end-to-end проверил TG-уведомления.
+- **21.04 UX-фикс по аудио-фидбеку Лёхи** — в item_detail.js секция "Telegram alerts" раньше скрывалась если предмета нет в Fav/Wishlist; Лёха думал что "таргет не работает". Теперь при пустом state показывается CTA + две кнопки "В Избранное / В Хотелки" (используют глобальный `.list-toggle` handler). После клика `events.on('lists:changed')` в item_detail перерисовывает модалку с полями 🔴/🟢. SW bump v4→v5, `item_detail.js`+`theme.js` добавлены в STATIC_ASSETS. Zip extension + LESHA-INSTRUCTIONS.md лежат в `runtime/release/`.
 - **cortex-vm — мертва с 19.04 00:00 UTC** (OOM kernel прибил funding-uvicorn). Snapshot pipeline стоит >30ч. User попросил Codex разобраться. Если нет — ресет `gcloud compute instances reset cortex-vm`.
 - **PharmOrder** — бриф для работы готов (`PHARMORDER_EXPORT_FIX_BRIEFING.md`). Симптом «касса пишет не выгрузила, а на VPS есть» → неидемпотентный /api/export. Патч через UUID request_id (server + index.html + cashbox + sync_standalone).
 - **apteka-bot** — фикс escape_markdown применён на VPS. Команда «История» снова возвращает список карточек.
-- **VoiceType / Cypher** — работает на новом USB-микрофоне Fifine. Двойной pythonw.exe — это norm venv-shim, не баг.
+- **VoiceType / Cypher** — работает на новом USB-микрофоне Fifine. Autostart + watchdog: `scripts/voicetype.vbs` в Startup, каждые 30с проверяет через WMI что `pythonw -m voice_type.main` жив, иначе поднимает. 15с delay после логона чтоб USB успел подняться. Двойной pythonw.exe (родитель+дочерний whisper-server) — норма, не баг.
 - **Klink** — отложено.
 - **Funding Scanner** — dashboard на VM (34.159.55.61:8080), сейчас недоступен из-за OOM VM.
-- **Diary система** — 19 записей в `memory/diary/`.
+- **Diary система** — 18 записей в `memory/diary/` (репо, единый источник правды после merge 21.04). pre-compact.py, /diary, /reflect теперь все пишут/читают туда. Новые правила идут в `C:\Users\User\.claude\projects\D--code-2026-2-cortex\memory\` (MEMORY.md + feedback/project/user files — per-user, не в git).
 
 ## Steam Sniper — статус после session 019
 
@@ -52,10 +53,10 @@
 - [ ] PharmOrder мониторинг (OOM, sync — неделю смотрим)
 - [ ] Klink: Seedance 2.0 — выбрать платформу (Jimeng vs Dreamina)
 - [ ] Cypher: Browser Use интеграция — L3 path
-- [ ] `/reflect` — накопилось 19 diary, пора
+- [ ] `/reflect` — накопилось 016-020 для обработки (после merge 21.04 команда наконец видит актуальные diary)
 - [ ] Funding: EdgeX verifier
 - [ ] Keenetic Hopper — WireGuard VPN
-- [ ] VoiceType: watchdog для хоткей-листенера (daemon thread умирает) — если воспроизведётся SetForegroundWindow loop, копать controller.py
+- [ ] VoiceType: если watchdog-pattern окажется мало (падает чаще раза в день) — копать controller.py daemon thread, возможно SetForegroundWindow loop
 
 ## Ссылки
 

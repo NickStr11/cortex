@@ -12,14 +12,8 @@ import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-MEMORY_DIR = Path(os.environ.get(
-    "CLAUDE_PROJECT_DIR",
-    r"D:\code\2026\2\cortex"
-)).parent.parent / ".claude" / "projects" / "D--code-2026-2-cortex" / "memory" / "diary"
-
-# Fallback: try project-local memory
 PROJECT_DIR = Path(os.environ.get("CLAUDE_PROJECT_DIR", r"D:\code\2026\2\cortex"))
-DIARY_DIR = Path(r"C:\Users\User\.claude\projects\D--code-2026-2-cortex\memory\diary")
+DIARY_DIR = PROJECT_DIR / "memory" / "diary"
 
 
 def get_next_number() -> int:
