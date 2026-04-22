@@ -48,7 +48,7 @@ def _seed_snapshot(path: Path) -> None:
             0.1534,
             279,
             901,
-            '[{"name":"Crown","image":"https://images.example/sticker.png","wear":0.02,"slot":0}]',
+            '[{"name":"Crown","image":"https://cdn.steamstatic.com/apps/730/icons/econ/stickers/crown.png","wear":0.02,"slot":0},{"name":"Lil\' Monster","image":"https://cdn.steamstatic.com/apps/730/icons/econ/keychains/lil_monster.png","wear":0,"slot":null}]',
             "test tag",
             None,
             "steam://inspect/123",
@@ -82,3 +82,22 @@ def test_get_item_listings_reads_sqlite_snapshot(tmp_path: Path) -> None:
     assert listings[0]["name_tag"] == "test tag"
     assert listings[0]["item_link"] == "steam://inspect/123"
     assert listings[0]["stickers"][0]["name"] == "Crown"
+    assert listings[0]["keychains"][0]["name"] == "Lil' Monster"
+
+
+def test_get_item_listings_supports_filters(tmp_path: Path) -> None:
+    path = tmp_path / "listings_snapshot.db"
+    _seed_snapshot(path)
+
+    listings, total, _ = get_item_listings(
+        "AWP | Asiimov (Field-Tested)",
+        limit=20,
+        float_min=0.1,
+        float_max=0.2,
+        has_stickers="yes",
+        has_keychains="yes",
+        path=path,
+    )
+
+    assert total == 1
+    assert len(listings) == 1

@@ -10,8 +10,11 @@ import { initCases } from './cases.js';
 import { initLists, loadUserLists, updateCardIndicators } from './lists.js';
 import { initItemDetail } from './item_detail.js';
 import { initRouter } from './router.js';
+import { initTheme } from './theme.js';
 
 async function init() {
+  initTheme();
+
   // Initialize all modules (register event listeners)
   initWatchlist();
   initSearch();
@@ -40,6 +43,7 @@ async function init() {
 
   events.on('lists:loaded', () => {
     updateCardIndicators();
+    loadStats();
   });
 
   events.on('catalog:loaded', () => {

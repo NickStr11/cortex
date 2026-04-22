@@ -131,14 +131,16 @@ def classify(name: str) -> str:
     if "Case Key" in clean or "Capsule Key" in clean or clean.endswith(" Key"):
         return "key"
 
-    # Cases and capsules
-    if "Case" in clean or "Capsule" in clean:
-        return "case"
-
-    # Weapon lookup: extract base name (part before " | ")
+    # Weapon lookup FIRST — "AK-47 | Case Hardened" has "Case" in skin name
+    # but base "AK-47" is a weapon.
     base = clean.split(" | ")[0].strip()
     if base in _WEAPON_MAP:
         return _WEAPON_MAP[base]
+
+    # Cases and capsules — check only base part (before " | ") to avoid
+    # matching skin names like "Case Hardened".
+    if "Case" in base or "Capsule" in base:
+        return "case"
 
     # Agent detection: items with " | FACTION" pattern
     if " | " in clean:

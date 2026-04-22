@@ -3,7 +3,7 @@
 
 .sniper-btn-container {
   position: fixed;
-  bottom: 20px;
+  bottom: 96px;
   right: 20px;
   z-index: 999999;
   display: flex;
@@ -60,6 +60,109 @@
   border-bottom: 1px solid #eee;
 }
 
+/* Inline target-price form — shown after user picks fav/wishlist */
+
+.sniper-target-form {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  margin-bottom: 8px;
+  padding: 14px 16px 12px;
+  min-width: 260px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #2c3e50;
+}
+
+.sniper-target-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #555;
+}
+
+.sniper-target-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sniper-target-label {
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 70px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sniper-target-below {
+  color: #c0392b;
+}
+
+.sniper-target-above {
+  color: #27ae60;
+}
+
+.sniper-target-input {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  color: #2c3e50;
+  background: #fff;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.sniper-target-input:focus {
+  border-color: #e67e22;
+  box-shadow: 0 0 0 2px rgba(230, 126, 34, 0.18);
+}
+
+.sniper-target-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.sniper-mini-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s, opacity 0.15s;
+  font-family: inherit;
+}
+
+.sniper-mini-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.sniper-mini-add {
+  background: #e67e22;
+  color: #fff;
+}
+
+.sniper-mini-add:hover:not(:disabled) {
+  background: #d35400;
+}
+
+.sniper-mini-skip {
+  background: #ecf0f1;
+  color: #555;
+}
+
+.sniper-mini-skip:hover:not(:disabled) {
+  background: #d5dbdc;
+}
+
 /* Toast notifications */
 
 .sniper-toast {
@@ -75,6 +178,7 @@
   z-index: 999999;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   transition: opacity 0.3s;
+  max-width: 380px;
 }
 
 .sniper-toast.sniper-success {

@@ -92,7 +92,11 @@ def init_db() -> None:
                 user_id    TEXT NOT NULL,
                 item_name  TEXT NOT NULL,
                 list_type  TEXT NOT NULL CHECK(list_type IN ('favorite','wishlist')),
-                added_at   TEXT NOT NULL DEFAULT (datetime('now'))
+                added_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                target_below_rub      REAL,
+                target_above_rub      REAL,
+                last_notified_below_at TEXT,
+                last_notified_above_at TEXT
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_user_lists_unique
                 ON user_lists(user_id, item_name, list_type);
@@ -105,6 +109,16 @@ def init_db() -> None:
             conn.execute("ALTER TABLE watchlist ADD COLUMN category TEXT")
         if "image_url" not in cols:
             conn.execute("ALTER TABLE watchlist ADD COLUMN image_url TEXT")
+
+        list_cols = {row[1] for row in conn.execute("PRAGMA table_info(user_lists)")}
+        if "target_below_rub" not in list_cols:
+            conn.execute("ALTER TABLE user_lists ADD COLUMN target_below_rub REAL")
+        if "target_above_rub" not in list_cols:
+            conn.execute("ALTER TABLE user_lists ADD COLUMN target_above_rub REAL")
+        if "last_notified_below_at" not in list_cols:
+            conn.execute("ALTER TABLE user_lists ADD COLUMN last_notified_below_at TEXT")
+        if "last_notified_above_at" not in list_cols:
+            conn.execute("ALTER TABLE user_lists ADD COLUMN last_notified_above_at TEXT")
 
 
 @beartype
@@ -389,6 +403,18 @@ def rename_list_item(user_id: str, old_name: str, new_name: str, list_type: str)
         return 0
 
     with get_conn() as conn:
+        old_row = conn.execute(
+            """
+            SELECT target_below_rub, target_above_rub,
+                   last_notified_below_at, last_notified_above_at
+            FROM user_lists
+            WHERE user_id=? AND item_name=? AND list_type=?
+            """,
+            (user_id, old_name, list_type),
+        ).fetchone()
+        if old_row is None:
+            return 0
+
         try:
             cur = conn.execute(
                 "UPDATE user_lists SET item_name=? WHERE user_id=? AND item_name=? AND list_type=?",
@@ -396,6 +422,25 @@ def rename_list_item(user_id: str, old_name: str, new_name: str, list_type: str)
             )
             return cur.rowcount
         except sqlite3.IntegrityError:
+            conn.execute(
+                """
+                UPDATE user_lists
+                SET target_below_rub = COALESCE(target_below_rub, ?),
+                    target_above_rub = COALESCE(target_above_rub, ?),
+                    last_notified_below_at = COALESCE(last_notified_below_at, ?),
+                    last_notified_above_at = COALESCE(last_notified_above_at, ?)
+                WHERE user_id=? AND item_name=? AND list_type=?
+                """,
+                (
+                    old_row["target_below_rub"],
+                    old_row["target_above_rub"],
+                    old_row["last_notified_below_at"],
+                    old_row["last_notified_above_at"],
+                    user_id,
+                    new_name,
+                    list_type,
+                ),
+            )
             cur = conn.execute(
                 "DELETE FROM user_lists WHERE user_id=? AND item_name=? AND list_type=?",
                 (user_id, old_name, list_type),
@@ -409,17 +454,121 @@ def get_list_items(user_id: str, list_type: str | None = None) -> list[dict]:
     with get_conn() as conn:
         if list_type:
             rows = conn.execute(
-                "SELECT item_name, list_type, added_at FROM user_lists "
+                "SELECT id, item_name, list_type, added_at, "
+                "target_below_rub, target_above_rub, "
+                "last_notified_below_at, last_notified_above_at "
+                "FROM user_lists "
                 "WHERE user_id=? AND list_type=? ORDER BY added_at DESC",
                 (user_id, list_type),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT item_name, list_type, added_at FROM user_lists "
+                "SELECT id, item_name, list_type, added_at, "
+                "target_below_rub, target_above_rub, "
+                "last_notified_below_at, last_notified_above_at "
+                "FROM user_lists "
                 "WHERE user_id=? ORDER BY added_at DESC",
                 (user_id,),
             ).fetchall()
     return [dict(row) for row in rows]
+
+
+@beartype
+def set_list_item_targets(
+    user_id: str,
+    item_name: str,
+    list_type: str,
+    target_below_rub: float | None,
+    target_above_rub: float | None,
+) -> int:
+    """Set list thresholds. Changing a threshold resets its notification cooldown."""
+    with get_conn() as conn:
+        current = conn.execute(
+            """
+            SELECT target_below_rub, target_above_rub,
+                   last_notified_below_at, last_notified_above_at
+            FROM user_lists
+            WHERE user_id=? AND item_name=? AND list_type=?
+            """,
+            (user_id, item_name, list_type),
+        ).fetchone()
+        if current is None:
+            return 0
+
+        below_changed = current["target_below_rub"] != target_below_rub
+        above_changed = current["target_above_rub"] != target_above_rub
+        cur = conn.execute(
+            """
+            UPDATE user_lists
+            SET target_below_rub=?,
+                target_above_rub=?,
+                last_notified_below_at=?,
+                last_notified_above_at=?
+            WHERE user_id=? AND item_name=? AND list_type=?
+            """,
+            (
+                target_below_rub,
+                target_above_rub,
+                None if below_changed else current["last_notified_below_at"],
+                None if above_changed else current["last_notified_above_at"],
+                user_id,
+                item_name,
+                list_type,
+            ),
+        )
+        return cur.rowcount
+
+
+@beartype
+def get_all_list_items_with_targets() -> list[dict]:
+    """Return all list rows that have at least one alert threshold configured."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, item_name, list_type, added_at,
+                   target_below_rub, target_above_rub,
+                   last_notified_below_at, last_notified_above_at
+            FROM user_lists
+            WHERE target_below_rub IS NOT NULL OR target_above_rub IS NOT NULL
+            ORDER BY added_at DESC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@beartype
+def mark_list_item_notified(item_id: int, direction: str, ts: str | None = None) -> int:
+    """Persist the timestamp for the last sent list alert in one direction."""
+    column = {
+        "below": "last_notified_below_at",
+        "above": "last_notified_above_at",
+    }.get(direction)
+    if not column:
+        raise ValueError(f"Unknown direction: {direction}")
+    ts = ts or datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"UPDATE user_lists SET {column}=? WHERE id=?",
+            (ts, item_id),
+        )
+        return cur.rowcount
+
+
+@beartype
+def clear_list_item_notified(item_id: int, direction: str) -> int:
+    """Clear cooldown marker when price leaves the triggered zone."""
+    column = {
+        "below": "last_notified_below_at",
+        "above": "last_notified_above_at",
+    }.get(direction)
+    if not column:
+        raise ValueError(f"Unknown direction: {direction}")
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"UPDATE user_lists SET {column}=NULL WHERE id=?",
+            (item_id,),
+        )
+        return cur.rowcount
 
 
 def get_all_list_names() -> set[str]:

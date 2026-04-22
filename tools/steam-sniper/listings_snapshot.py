@@ -93,31 +93,100 @@ def snapshot_status(path: Path = SNAPSHOT_DB_PATH) -> dict:
     }
 
 
-def get_item_listings(name: str, limit: int, path: Path = SNAPSHOT_DB_PATH) -> tuple[list[dict], int, str]:
+def _normalize_filter_flag(value: str) -> str:
+    normalized = str(value or "all").strip().lower()
+    return normalized if normalized in {"all", "yes", "no"} else "all"
+
+
+def _attachments_sql(flag: str, attachment_path: str) -> tuple[str, list[str]]:
+    if flag == "yes":
+        return "stickers_json LIKE ?", [f"%{attachment_path}%"]
+    if flag == "no":
+        return "stickers_json NOT LIKE ?", [f"%{attachment_path}%"]
+    return "", []
+
+
+def _split_attachments(attachments: list[dict]) -> tuple[list[dict], list[dict]]:
+    stickers: list[dict] = []
+    keychains: list[dict] = []
+    for attachment in attachments:
+        image = str(attachment.get("image") or "")
+        target = keychains if "/econ/keychains/" in image else stickers
+        target.append(attachment)
+    return stickers, keychains
+
+
+def get_item_listings(
+    name: str,
+    limit: int,
+    *,
+    sort: str = "price_asc",
+    float_min: float | None = None,
+    float_max: float | None = None,
+    has_stickers: str = "all",
+    has_keychains: str = "all",
+    path: Path = SNAPSHOT_DB_PATH,
+) -> tuple[list[dict], int, str]:
     """Read one item's listings from the snapshot DB."""
     status = snapshot_status(path)
     if not status["available"]:
         return [], 0, ""
 
+    sort_key = str(sort or "price_asc").lower()
+    if sort_key not in {"price_asc", "price_desc", "float_asc", "float_desc"}:
+        sort_key = "price_asc"
+    order_sql = {
+        "price_asc": "price ASC, id ASC",
+        "price_desc": "price DESC, id DESC",
+        "float_asc": "CASE WHEN float_value IS NULL THEN 1 ELSE 0 END, float_value ASC, price ASC",
+        "float_desc": "CASE WHEN float_value IS NULL THEN 1 ELSE 0 END, float_value DESC, price ASC",
+    }[sort_key]
+
+    has_stickers = _normalize_filter_flag(has_stickers)
+    has_keychains = _normalize_filter_flag(has_keychains)
+
+    clauses = ["name_lower = ?"]
+    params: list[object] = [name.lower()]
+    if float_min is not None:
+        clauses.append("float_value IS NOT NULL AND float_value >= ?")
+        params.append(float(float_min))
+    if float_max is not None:
+        clauses.append("float_value IS NOT NULL AND float_value <= ?")
+        params.append(float(float_max))
+
+    stickers_clause, stickers_params = _attachments_sql(has_stickers, "/econ/stickers/")
+    if stickers_clause:
+        clauses.append(stickers_clause)
+        params.extend(stickers_params)
+
+    keychains_clause, keychains_params = _attachments_sql(has_keychains, "/econ/keychains/")
+    if keychains_clause:
+        clauses.append(keychains_clause)
+        params.extend(keychains_params)
+
+    where_sql = " AND ".join(clauses)
+
     with _open_readonly(path) as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT id, price, float_value, paint_index, paint_seed, stickers_json,
                    name_tag, unlock_at, item_link
             FROM listings
-            WHERE name_lower = ?
-            ORDER BY price ASC
+            WHERE {where_sql}
+            ORDER BY {order_sql}
             LIMIT ?
             """,
-            (name.lower(), limit),
+            (*params, limit),
         ).fetchall()
         total = conn.execute(
-            "SELECT COUNT(*) AS count FROM listings WHERE name_lower = ?",
-            (name.lower(),),
+            f"SELECT COUNT(*) AS count FROM listings WHERE {where_sql}",
+            params,
         ).fetchone()["count"]
 
     listings = []
     for row in rows:
+        attachments = json.loads(row["stickers_json"] or "[]")
+        stickers, keychains = _split_attachments(attachments)
         listings.append(
             {
                 "id": row["id"],
@@ -125,7 +194,8 @@ def get_item_listings(name: str, limit: int, path: Path = SNAPSHOT_DB_PATH) -> t
                 "float": row["float_value"],
                 "paint_index": row["paint_index"],
                 "paint_seed": row["paint_seed"],
-                "stickers": json.loads(row["stickers_json"] or "[]"),
+                "stickers": stickers,
+                "keychains": keychains,
                 "name_tag": row["name_tag"],
                 "unlock_at": row["unlock_at"],
                 "item_link": row["item_link"],

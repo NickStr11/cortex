@@ -11,8 +11,6 @@ const _limit = 50;
 let _searchTimeout = null;
 let _loaded = false;
 
-const STEAM_IMG_BASE = 'https://community.akamai.steamstatic.com/economy/image/';
-
 // --- Fetch + render ---
 
 export async function loadCases() {
@@ -49,12 +47,9 @@ function renderCasesGrid(items) {
 
   let html = '';
   for (const item of items) {
-    const imgSrc = item.url
-      ? STEAM_IMG_BASE + item.url + '/200fx200f'
-      : '';
-    const imgHtml = imgSrc
-      ? '<img class="cat-card-img" src="' + imgSrc + '" loading="lazy" alt="">'
-      : '<div class="cat-card-img-empty"></div>';
+    const imgHtml = item.image
+      ? '<img class="cat-card-img" src="' + item.image + '" loading="lazy" alt="">'
+      : '<div class="cat-card-img-empty">\ud83d\udce6</div>';
     const countCls = item.count > 0 ? '' : ' unavailable';
     const safeName = (item.name || '').replace(/"/g, '&quot;');
 

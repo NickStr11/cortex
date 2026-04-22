@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -23,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from build_image_cache import ensure_image_cache, load_image_cache
+from build_image_cache import ensure_image_cache, fetch_bymykel_all, load_image_cache
 import db
 from category import classify
 from listings_snapshot import get_item_listings as snapshot_get_item_listings
@@ -39,6 +40,7 @@ logger = logging.getLogger("sniper.server")
 LISSKINS_URL = "https://lis-skins.com/market_export_json/csgo.json"
 CBR_URL = "https://www.cbr-xml-daily.ru/daily_json.js"
 COLLECT_INTERVAL = 300  # 5 minutes
+LIST_ALERT_COOLDOWN = timedelta(hours=6)
 MSK = timezone(timedelta(hours=3))
 
 # --- Module-level state ---
@@ -46,9 +48,11 @@ MSK = timezone(timedelta(hours=3))
 _prices: dict[str, dict] = {}  # {name_lower: {name, price, url, count}}
 _category_counts: dict[str, int] = {}  # {category: count} for sidebar
 _image_cache: dict[str, str] = {}  # {name_lower: image_url} from ByMykel API
+_item_meta: dict[str, dict[str, str]] = {}  # {name_lower: {rarity_name, rarity_label, rarity_color}}
 _usd_rub: float = 0.0
 _last_update: str = ""
 _collector_task: asyncio.Task | None = None
+ITEM_META_CACHE_PATH = Path(__file__).parent / "data" / "item_meta_cache.json"
 
 
 # Lis-skins uses their own USD/RUB rate ≈ CBR × 1.034 (3.4% markup).
@@ -70,7 +74,10 @@ def _fetch_lis_skins() -> list[dict]:
         return json.loads(resp.read().decode("utf-8"))
 
 
-_WEAR_RE = re.compile(r"\s*\((Factory New|Minimal Wear|Field-Tested|Well-Worn|Battle-Scarred)\)$")
+_WEAR_RE = re.compile(
+    r"\s*\((factory new|minimal wear|field-tested|well-worn|battle-scarred)\)$",
+    re.IGNORECASE,
+)
 
 # Russian → English CS2 term dictionary for local search
 _RU_EN_DICT: dict[str, str] = {
@@ -178,21 +185,250 @@ def _translate_ru_to_en(query: str) -> str:
     return " ".join(result_parts) if matched else ""
 
 
+_STATE_PREFIXES = (
+    "souvenir ",
+    "stattrak\u2122 ",
+    "\u2605 stattrak\u2122 ",
+    "\u2605 ",
+)
+
+_STATE_PREFIX_KIND = {
+    "souvenir ": "souvenir",
+    "stattrak\u2122 ": "stattrak",
+    "\u2605 stattrak\u2122 ": "knife_stattrak",
+    "\u2605 ": "knife",
+}
+
+_WEAR_CODES = {
+    "Factory New": "FN",
+    "Minimal Wear": "MW",
+    "Field-Tested": "FT",
+    "Well-Worn": "WW",
+    "Battle-Scarred": "BS",
+}
+
+_WEAR_CODES_LOWER = {name.lower(): code for name, code in _WEAR_CODES.items()}
+
+_WEAR_LABELS_RU = {
+    "FN": "Прямо с завода",
+    "MW": "Немного поношенное",
+    "FT": "После полевых испытаний",
+    "WW": "Поношенное",
+    "BS": "Закалённое в боях",
+}
+
+_WEAR_ORDER = ("FN", "MW", "FT", "WW", "BS")
+_MODEL_CATEGORIES = {"rifle", "pistol", "smg", "shotgun", "machinegun", "knife"}
+
+_RARITY_LABELS_RU = {
+    "Base Grade": "Базовое",
+    "Consumer Grade": "Ширпотреб",
+    "Industrial Grade": "Промышленное",
+    "Mil-Spec Grade": "Армейское",
+    "Restricted": "Запрещённое",
+    "Classified": "Засекреченное",
+    "Covert": "Тайное",
+    "Contraband": "Контрабанда",
+    "Extraordinary": "Экстраординарное",
+    "High Grade": "Высший сорт",
+    "Remarkable": "Примечательное",
+    "Exotic": "Экзотическое",
+    "Superior": "Superior",
+    "Master": "Master",
+    "Exceptional": "Exceptional",
+    "Distinguished": "Distinguished",
+    "Default": "Обычное",
+    "Highlight Base Grade": "Highlight",
+}
+
+_EMPHASIZED_RARITIES = {"Тайное", "Засекреченное"}
+
+
+def _strip_state_prefix(name_lower: str) -> tuple[str, str]:
+    for prefix in _STATE_PREFIXES:
+        if name_lower.startswith(prefix):
+            return _STATE_PREFIX_KIND[prefix], name_lower[len(prefix):]
+    return "normal", name_lower
+
+
+def _lookup_name_candidates(name: str) -> list[str]:
+    key = _normalize_spaces(name).lower()
+    candidates = [key]
+    idx = key.rfind(" (")
+    base = key[:idx] if idx > 0 else key
+    if base != key:
+        candidates.append(base)
+
+    _, stripped_key = _strip_state_prefix(key)
+    _, stripped_base = _strip_state_prefix(base)
+    if stripped_key not in candidates:
+        candidates.append(stripped_key)
+    if stripped_base not in candidates:
+        candidates.append(stripped_base)
+
+    return [candidate for candidate in candidates if candidate]
+
+
+def _get_item_meta(name: str) -> dict[str, str]:
+    for candidate in _lookup_name_candidates(name):
+        meta = _item_meta.get(candidate)
+        if meta:
+            return meta
+    return {}
+
+
+def _base_item_key(name: str) -> tuple[str, str]:
+    normalized = _normalize_spaces(name).lower()
+    state_kind, stripped = _strip_state_prefix(normalized)
+    base = _WEAR_RE.sub("", stripped).strip()
+    return state_kind, base
+
+
+def _wear_code_from_name(name: str) -> str | None:
+    match = _WEAR_RE.search(name)
+    if not match:
+        return None
+    return _WEAR_CODES_LOWER.get(match.group(1).lower())
+
+
+def _weapon_model(name: str) -> str:
+    raw = _normalize_spaces(name)
+    for prefix in ("Souvenir ", "StatTrak™ ", "★ StatTrak™ ", "★ "):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix):]
+            break
+    return raw.split("|", 1)[0].strip()
+
+
+def _split_listing_attachments(attachments: list[dict]) -> tuple[list[dict], list[dict]]:
+    stickers: list[dict] = []
+    keychains: list[dict] = []
+    for attachment in attachments:
+        image = str(attachment.get("image") or "")
+        target = keychains if "/econ/keychains/" in image else stickers
+        target.append(attachment)
+    return stickers, keychains
+
+
+def _load_item_meta_from_file() -> dict[str, dict[str, str]]:
+    if not ITEM_META_CACHE_PATH.exists():
+        return {}
+    try:
+        raw = json.loads(ITEM_META_CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for name, meta in raw.items():
+        if not isinstance(meta, dict):
+            continue
+        out[str(name).strip().lower()] = {
+            "rarity_name": str(meta.get("rarity_name") or "").strip(),
+            "rarity_label": str(meta.get("rarity_label") or "").strip(),
+            "rarity_color": str(meta.get("rarity_color") or "").strip(),
+        }
+    return out
+
+
+def _save_item_meta_cache(cache: dict[str, dict[str, str]]) -> None:
+    ITEM_META_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ITEM_META_CACHE_PATH.write_text(
+        json.dumps(cache, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+
+def _build_item_meta_cache(payload: dict | list) -> dict[str, dict[str, str]]:
+    items = payload.values() if isinstance(payload, dict) else payload
+    cache: dict[str, dict[str, str]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        rarity = item.get("rarity") or {}
+        if not isinstance(rarity, dict):
+            rarity = {}
+        rarity_name = str(rarity.get("name") or "").strip()
+        rarity_color = str(rarity.get("color") or "").strip()
+        rarity_label = _RARITY_LABELS_RU.get(rarity_name, rarity_name)
+        meta = {
+            "rarity_name": rarity_name,
+            "rarity_label": rarity_label,
+            "rarity_color": rarity_color,
+        }
+        for raw_name in (item.get("name"), item.get("market_hash_name")):
+            name = str(raw_name or "").strip().lower()
+            if name:
+                cache.setdefault(name, meta)
+    return cache
+
+
+def _ensure_item_meta_cache(refresh: bool = False) -> dict[str, dict[str, str]]:
+    if not refresh:
+        existing = _load_item_meta_from_file()
+        if existing:
+            return existing
+
+    payload = fetch_bymykel_all()
+    cache = _build_item_meta_cache(payload)
+    if cache:
+        _save_item_meta_cache(cache)
+    return cache
+
+
+_DOPPLER_SUFFIX_RE = re.compile(
+    r"\s+(phase\s+\d|ruby|sapphire|black\s+pearl|emerald)$",
+    re.IGNORECASE,
+)
+
+
 def _get_item_image(name: str) -> str:
-    """Lookup image from cache. Falls back to base name without wear."""
+    """Lookup image from cache. Falls back through wear/state/doppler-phase variants."""
     key = name.lower()
-    # Exact match (stickers, cases, agents — no wear suffix)
     img = _image_cache.get(key)
     if img:
         return img
-    # Strip wear suffix: "AK-47 | Redline (Field-Tested)" -> "AK-47 | Redline"
-    # Remove last parenthetical with wear name
+
+    # Split wear suffix: "AK-47 | Redline (Field-Tested)" → base + " (field-tested)"
     idx = key.rfind(" (")
     if idx > 0:
         base = key[:idx]
-        img2 = _image_cache.get(base, "")
-        if img2:
-            return img2
+        wear_part = key[idx:]
+    else:
+        base = key
+        wear_part = ""
+
+    # 1. Base without wear
+    if base != key:
+        img = _image_cache.get(base)
+        if img:
+            return img
+
+    # 2. Base without state prefix (StatTrak/Souvenir/★)
+    stripped_base = base
+    for prefix in _STATE_PREFIXES:
+        if stripped_base.startswith(prefix):
+            stripped_base = stripped_base[len(prefix):]
+            break
+    if stripped_base != base:
+        img = _image_cache.get(stripped_base)
+        if img:
+            return img
+
+    # 3. Strip Doppler phase/gem suffix ("Phase 1/2/3/4", "Ruby", "Sapphire",
+    # "Black Pearl", "Emerald") — ByMykel keeps Doppler as a single entry per knife
+    for candidate in (base, stripped_base):
+        no_phase = _DOPPLER_SUFFIX_RE.sub("", candidate)
+        if no_phase == candidate:
+            continue
+        if wear_part:
+            img = _image_cache.get(no_phase + wear_part)
+            if img:
+                return img
+        img = _image_cache.get(no_phase)
+        if img:
+            return img
+
     return ""
 
 
@@ -298,7 +534,26 @@ async def _load_image_cache() -> None:
             logger.warning("Image cache unavailable: %s", e)
 
 
-async def _collect_once() -> None:
+async def _load_item_meta_cache() -> None:
+    """Ensure rarity metadata cache exists locally and load it into memory."""
+    global _item_meta
+    try:
+        _item_meta = await asyncio.to_thread(_ensure_item_meta_cache)
+        if _item_meta:
+            logger.info("Item meta cache ready: %d items", len(_item_meta))
+    except Exception as e:
+        _item_meta = _load_item_meta_from_file()
+        if _item_meta:
+            logger.warning(
+                "Item meta refresh failed, using local cache (%d items): %s",
+                len(_item_meta),
+                e,
+            )
+        else:
+            logger.warning("Item meta cache unavailable: %s", e)
+
+
+async def _collect_once(send_list_alerts: bool = True) -> None:
     """Fetch prices + rate, snapshot watched items, prune old history."""
     global _prices, _category_counts, _image_cache, _usd_rub, _last_update
 
@@ -337,6 +592,9 @@ async def _collect_once() -> None:
     if snapshots:
         db.insert_price_snapshots(snapshots)
 
+    if send_list_alerts:
+        await _check_list_alerts()
+
     db.prune_old_history(90)
     _last_update = datetime.now(MSK).isoformat(timespec="seconds")
     logger.info(
@@ -360,10 +618,11 @@ async def _collector_loop() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Startup: init db, first collect, start loops. Shutdown: cancel loops."""
-    global _collector_task, _image_cache
+    global _collector_task, _image_cache, _item_meta
     db.init_db()
     await _load_image_cache()
-    await _collect_once()
+    await _load_item_meta_cache()
+    await _collect_once(send_list_alerts=False)
     _collector_task = asyncio.create_task(_collector_loop())
     yield
     if _collector_task:
@@ -382,6 +641,16 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+
+
+@app.middleware("http")
+async def _no_cache_static(request, call_next):
+    """Force browsers to revalidate static JS/CSS/HTML via ETag on each request."""
+    resp = await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/") or path == "/" or path == "/sw.js":
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return resp
 
 
 # --- Service worker (root scope for PWA) ---
@@ -416,6 +685,14 @@ class ListItemRequest(BaseModel):
     list_type: str  # "favorite" or "wishlist"
 
 
+class ListTargetUpdateRequest(BaseModel):
+    user: str
+    item_name: str
+    list_type: str  # "favorite" or "wishlist"
+    target_below_rub: float | None = None
+    target_above_rub: float | None = None
+
+
 # CS2 rarity → color mapping (Russian category names from Steam API)
 _RARITY_COLORS: dict[str, str] = {
     "ширпотреб": "#b0c3d9",
@@ -440,6 +717,57 @@ def _rarity_color(category: str | None) -> str:
         if keyword in cat_lower:
             return color
     return "#b0c3d9"
+
+
+def _get_rarity_meta(name: str) -> dict[str, str | bool]:
+    meta = _get_item_meta(name)
+    label = str(meta.get("rarity_label") or "").strip()
+    color = str(meta.get("rarity_color") or "").strip() or "#b0c3d9"
+    return {
+        "label": label,
+        "name": str(meta.get("rarity_name") or "").strip(),
+        "color": color,
+        "emphasis": label in _EMPHASIZED_RARITIES,
+    }
+
+
+def _build_wear_tiers(name: str, rate: float) -> list[dict]:
+    current_wear = _wear_code_from_name(name)
+    if not current_wear:
+        return []
+
+    family = _base_item_key(name)
+    variants: dict[str, dict] = {}
+    for item in _prices.values():
+        item_name = item.get("name")
+        if not item_name or _base_item_key(item_name) != family:
+            continue
+        wear_code = _wear_code_from_name(item_name)
+        if not wear_code:
+            continue
+        variants[wear_code] = item
+
+    tiers = []
+    for wear_code in _WEAR_ORDER:
+        item = variants.get(wear_code)
+        if not item:
+            continue
+        min_price_usd = item.get("price")
+        tiers.append(
+            {
+                "wear": wear_code,
+                "label": _WEAR_LABELS_RU[wear_code],
+                "name": item["name"],
+                "count": item.get("count", 0),
+                "min_price_usd": min_price_usd,
+                "min_price_rub": (
+                    round(float(min_price_usd) * rate, 2)
+                    if min_price_usd is not None else None
+                ),
+                "active": wear_code == current_wear,
+            }
+        )
+    return tiers
 
 
 # --- Endpoints ---
@@ -643,6 +971,174 @@ def _resolve_item_name(name: str) -> str:
     return raw
 
 
+def _find_price_item(name: str) -> dict | None:
+    """Lookup an item in the live price cache without hitting remote search."""
+    raw = name.strip()
+    if not raw:
+        return None
+    candidates = [raw, _normalize_spaces(raw)]
+    fixed = _fix_mojibake(raw)
+    if fixed != raw:
+        candidates.extend([fixed, _normalize_spaces(fixed)])
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = candidate.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        item = _prices.get(key)
+        if item:
+            return item
+    return None
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=MSK)
+    return parsed.astimezone(MSK)
+
+
+def _notified_recently(value: str | None) -> bool:
+    ts = _parse_timestamp(value)
+    if ts is None:
+        return False
+    return datetime.now(MSK) - ts < LIST_ALERT_COOLDOWN
+
+
+def _list_alert_chat_ids() -> list[str]:
+    raw = (
+        os.environ.get("LIST_ALERT_CHAT_IDS")
+        or os.environ.get("LESHA_TG_CHAT_ID")
+        or os.environ.get("ALERT_CHAT_IDS", "")
+    )
+    ids: list[str] = []
+    for part in raw.split(","):
+        cid = part.strip()
+        if cid and cid not in ids:
+            ids.append(cid)
+    return ids
+
+
+def _list_type_label(list_type: str) -> str:
+    return "Избранное" if list_type == "favorite" else "Хотелки"
+
+
+def _format_list_alert_message(
+    entry: dict,
+    direction: str,
+    current_price_rub: float,
+    url: str,
+) -> str:
+    target = entry["target_below_rub"] if direction == "below" else entry["target_above_rub"]
+    icon = "🔴" if direction == "below" else "🟢"
+    title = "Цена упала" if direction == "below" else "Цена выросла"
+    lines = [
+        f"{icon} {title}: {entry['item_name']}",
+        f"Сейчас: {round(current_price_rub):,} ₽".replace(",", " "),
+        f"Твой target: {round(float(target or 0)):,} ₽".replace(",", " "),
+        f"Список: {_list_type_label(entry['list_type'])}",
+    ]
+    if url:
+        lines.append(f"lis-skins: {url}")
+    return "\n".join(lines)
+
+
+def _send_telegram_message_sync(text: str, chat_ids: list[str] | None = None) -> int:
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_ids = chat_ids or _list_alert_chat_ids()
+    if not token or not chat_ids:
+        return 0
+
+    sent = 0
+    api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+    for chat_id in chat_ids:
+        payload = urllib.parse.urlencode({
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": "true",
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            api_url,
+            data=payload,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            if data.get("ok"):
+                sent += 1
+            else:
+                logger.warning("Telegram send failed for %s: %s", chat_id, data)
+        except Exception as e:
+            logger.warning("Telegram send failed for %s: %s", chat_id, e)
+    return sent
+
+
+async def _send_telegram_message(text: str, chat_ids: list[str] | None = None) -> int:
+    return await asyncio.to_thread(_send_telegram_message_sync, text, chat_ids)
+
+
+async def _check_list_alerts() -> None:
+    """Send Telegram alerts for favorite/wishlist thresholds with cooldown."""
+    rate = _lis_rate()
+    if rate <= 0:
+        return
+
+    for entry in db.get_all_list_items_with_targets():
+        item = _find_price_item(entry["item_name"])
+        if not item:
+            continue
+
+        current_price_rub = item["price"] * rate
+        url = item.get("url", "")
+
+        below_target = entry.get("target_below_rub")
+        if below_target is not None:
+            if current_price_rub <= float(below_target):
+                if not _notified_recently(entry.get("last_notified_below_at")):
+                    message = _format_list_alert_message(
+                        entry,
+                        "below",
+                        current_price_rub,
+                        url,
+                    )
+                    sent = await _send_telegram_message(message)
+                    if sent:
+                        db.mark_list_item_notified(
+                            int(entry["id"]),
+                            "below",
+                            datetime.now(MSK).isoformat(timespec="seconds"),
+                        )
+            elif entry.get("last_notified_below_at"):
+                db.clear_list_item_notified(int(entry["id"]), "below")
+
+        above_target = entry.get("target_above_rub")
+        if above_target is not None:
+            if current_price_rub >= float(above_target):
+                if not _notified_recently(entry.get("last_notified_above_at")):
+                    message = _format_list_alert_message(
+                        entry,
+                        "above",
+                        current_price_rub,
+                        url,
+                    )
+                    sent = await _send_telegram_message(message)
+                    if sent:
+                        db.mark_list_item_notified(
+                            int(entry["id"]),
+                            "above",
+                            datetime.now(MSK).isoformat(timespec="seconds"),
+                        )
+            elif entry.get("last_notified_above_at"):
+                db.clear_list_item_notified(int(entry["id"]), "above")
+
+
 @app.get("/api/search")
 @beartype
 def search_items(q: str = Query(min_length=2)) -> dict:
@@ -711,11 +1207,16 @@ def get_catalog(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     category: str | None = Query(default=None),
+    state: str = Query(default="all"),
     sort: str = Query(default="name_asc"),
+    model: str | None = Query(default=None),
     q: str | None = Query(default=None),
 ) -> dict:
     """Browse full catalog with pagination, filtering, sorting, and search."""
     rate = _lis_rate()
+
+    if state not in ("all", "normal", "stattrak", "souvenir"):
+        state = "all"
 
     # Build enriched list from in-memory prices
     items: list[dict] = []
@@ -726,9 +1227,21 @@ def get_catalog(
         if category and cat != category:
             continue
 
+        # State filter (StatTrak / Souvenir / normal)
+        name = item["name"]
+        is_stattrak = "StatTrak\u2122" in name
+        is_souvenir = name.startswith("Souvenir ") or " Souvenir " in name
+        if state == "stattrak" and not is_stattrak:
+            continue
+        if state == "souvenir" and not is_souvenir:
+            continue
+        if state == "normal" and (is_stattrak or is_souvenir):
+            continue
+
         item_dict = {
             "name": item["name"],
             "category": cat,
+            "model": _weapon_model(item["name"]) if cat in _MODEL_CATEGORIES else "",
             "price_usd": item["price"],
             "price_rub": round(item["price"] * rate, 2),
             "count": item.get("count", 0),
@@ -766,6 +1279,28 @@ def get_catalog(
                 if all(w in it["name"].lower() for w in words)
             ]
 
+    models: list[dict[str, int | str]] = []
+    if category in _MODEL_CATEGORIES:
+        model_counts: dict[str, int] = {}
+        for item in items:
+            model_name = item.get("model") or ""
+            if not model_name:
+                continue
+            model_counts[model_name] = model_counts.get(model_name, 0) + 1
+        models = [
+            {"name": model_name, "count": count}
+            for model_name, count in sorted(
+                model_counts.items(),
+                key=lambda pair: (-pair[1], pair[0].lower()),
+            )
+        ]
+
+    if model:
+        items = [
+            item for item in items
+            if (item.get("model") or "").lower() == model.lower()
+        ]
+
     # Sort
     if sort not in _CATALOG_SORTS:
         sort = "name_asc"
@@ -789,18 +1324,29 @@ def get_catalog(
         "limit": limit,
         "offset": offset,
         "categories": _category_counts,
+        "models": models,
     }
 
 
 @app.get("/api/item/{name}")
 @beartype
-def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> dict:
+def get_item_detail(
+    name: str,
+    limit: int = Query(default=40, ge=1, le=100),
+    sort: str = Query(default="price_asc"),
+    float_min: float | None = Query(default=None, ge=0.0, le=1.0),
+    float_max: float | None = Query(default=None, ge=0.0, le=1.0),
+    has_stickers: str = Query(default="all"),
+    has_keychains: str = Query(default="all"),
+) -> dict:
     """Return detailed listings for a single skin from the local snapshot DB."""
     rate = _lis_rate()
     key = name.lower()
     summary_src = _prices.get(key, {})
     summary_name = summary_src.get("name", name)
     snap = snapshot_status()
+    rarity = _get_rarity_meta(summary_name)
+    wear_code = _wear_code_from_name(summary_name)
     summary = {
         "name": summary_name,
         "url": summary_src.get("url", ""),
@@ -812,11 +1358,25 @@ def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> 
         ),
         "image": _get_item_image(summary_name),
         "category": classify(summary_name) if summary_name else "",
-        "rarity_color": _rarity_color(summary_src.get("category")),
+        "weapon_model": _weapon_model(summary_name) if "|" in summary_name else "",
+        "wear_code": wear_code,
+        "wear_label": _WEAR_LABELS_RU.get(wear_code or "", ""),
+        "rarity_label": rarity["label"],
+        "rarity_name": rarity["name"],
+        "rarity_color": rarity["color"],
+        "rarity_emphasis": rarity["emphasis"],
+        "steam_price_usd": None,
+        "steam_price_rub": None,
+        "discount_pct": None,
     }
     listings_raw, total_available, listings_updated = snapshot_get_item_listings(
         summary_name,
         limit,
+        sort=sort,
+        float_min=float_min,
+        float_max=float_max,
+        has_stickers=has_stickers,
+        has_keychains=has_keychains,
     )
 
     listings = [
@@ -828,6 +1388,7 @@ def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> 
             "paint_index": lst.get("paint_index"),
             "paint_seed": lst.get("paint_seed"),
             "stickers": lst.get("stickers") or [],
+            "keychains": lst.get("keychains") or [],
             "name_tag": lst.get("name_tag"),
             "unlock_at": lst.get("unlock_at"),
             "item_link": lst.get("item_link"),
@@ -843,6 +1404,7 @@ def get_item_detail(name: str, limit: int = Query(default=20, ge=1, le=100)) -> 
         "snapshot_available": snap["available"],
         "snapshot_built_at": snap["built_at"],
         "snapshot_size_bytes": snap["size_bytes"],
+        "wear_tiers": _build_wear_tiers(summary_name, rate),
     }
 
 
@@ -859,6 +1421,7 @@ def debug_info() -> dict:
     """Debug endpoint for cache/snapshot status."""
     return {
         "image_cache_size": len(_image_cache),
+        "item_meta_size": len(_item_meta),
         "prices_size": len(_prices),
         "rate": _lis_rate(),
         "snapshot": snapshot_status(),
@@ -915,6 +1478,37 @@ def remove_list_item_endpoint(body: ListItemRequest) -> dict:
     return {"ok": True, "removed": count}
 
 
+@app.patch("/api/lists/target", response_model=None)
+@beartype
+def update_list_targets_endpoint(body: ListTargetUpdateRequest) -> JSONResponse | dict:
+    """Update favorite/wishlist alert thresholds without changing list membership."""
+    if body.list_type not in ("favorite", "wishlist"):
+        return JSONResponse({"error": "list_type must be 'favorite' or 'wishlist'"}, status_code=400)
+    for value in (body.target_below_rub, body.target_above_rub):
+        if value is not None and value <= 0:
+            return JSONResponse({"error": "targets must be > 0 or null"}, status_code=400)
+
+    resolved_name = _resolve_item_name(body.item_name)
+    count = db.set_list_item_targets(
+        user_id=body.user,
+        item_name=resolved_name,
+        list_type=body.list_type,
+        target_below_rub=body.target_below_rub,
+        target_above_rub=body.target_above_rub,
+    )
+    if count == 0 and resolved_name != body.item_name:
+        count = db.set_list_item_targets(
+            user_id=body.user,
+            item_name=body.item_name,
+            list_type=body.list_type,
+            target_below_rub=body.target_below_rub,
+            target_above_rub=body.target_above_rub,
+        )
+    if count == 0:
+        return JSONResponse({"error": "list item not found"}, status_code=404)
+    return {"ok": True, "item_name": resolved_name}
+
+
 @app.get("/api/lists")
 @beartype
 def get_list_items_endpoint(user: str = Query(...), type: str | None = Query(default=None)) -> dict:
@@ -939,17 +1533,31 @@ def get_list_items_endpoint(user: str = Query(...), type: str | None = Query(def
             continue
         seen.add(dedupe_key)
 
-        item_data = _prices.get(name.lower())
+        item_data = _find_price_item(name)
+        current_price_rub = (
+            round(item_data["price"] * _lis_rate(), 2)
+            if item_data else None
+        )
+        target_below = item.get("target_below_rub")
+        target_above = item.get("target_above_rub")
         enriched.append({
             **item,
             "image": _get_item_image(name),
-            "price_rub": (
-                round(item_data["price"] * _lis_rate(), 2)
-                if item_data else None
-            ),
+            "price_rub": current_price_rub,
+            "current_price_rub": current_price_rub,
             "count": item_data["count"] if item_data else None,
             "category": classify(name),
             "url": item_data["url"] if item_data else "",
+            "alert_below_triggered": (
+                current_price_rub is not None
+                and target_below is not None
+                and current_price_rub <= float(target_below)
+            ),
+            "alert_above_triggered": (
+                current_price_rub is not None
+                and target_above is not None
+                and current_price_rub >= float(target_above)
+            ),
         })
     return {"items": enriched}
 

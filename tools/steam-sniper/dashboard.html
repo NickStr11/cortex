@@ -12,6 +12,14 @@
 <title>Steam Sniper</title>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/styles.css">
+<script>
+(function(){
+  try {
+    var t = localStorage.getItem('ss:theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+  } catch(e){}
+})();
+</script>
 <script src="https://unpkg.com/lightweight-charts@5/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -36,22 +44,26 @@
         <span class="label">Обновлено</span>
         <span class="value" id="lastUpdate">&mdash;</span>
       </div>
+      <button class="theme-toggle" id="themeToggle" type="button" title="Переключить тему" aria-label="Переключить тему">
+        <span class="theme-toggle-icon" data-icon="dark">&#9790;</span>
+        <span class="theme-toggle-icon" data-icon="light">&#9728;</span>
+      </button>
     </div>
   </div>
 
   <!-- Hero Stats -->
   <div id="heroStats" class="hero-stats">
     <div class="hero-card">
-      <div class="hc-label">Portfolio Value</div>
+      <div class="hc-label">Избранное</div>
       <div class="hc-value" id="heroValue">--</div>
     </div>
     <div class="hero-card">
-      <div class="hc-label">Delta</div>
+      <div class="hc-label">Хотелки</div>
       <div class="hc-value" id="heroDelta">--</div>
     </div>
-    <div class="hero-card">
-      <div class="hc-label">Items</div>
-      <div class="hc-value" id="heroCount">--</div>
+    <div class="hero-card" id="heroAlertsCard">
+      <div class="hc-label">Алерты</div>
+      <div class="hc-value" id="heroCount">—</div>
     </div>
   </div>
 
@@ -111,9 +123,9 @@
     <div class="catalog-layout">
       <!-- Sidebar -->
       <aside class="catalog-sidebar" id="catalogSidebar">
-        <div class="sidebar-title">Categories</div>
+        <div class="sidebar-title">Категории</div>
         <button class="sidebar-item active" data-category="">
-          <span class="sidebar-name">All</span>
+          <span class="sidebar-name">Все</span>
           <span class="sidebar-count" id="catCountAll">--</span>
         </button>
         <!-- Dynamic category buttons injected by catalog.js -->
@@ -124,13 +136,22 @@
         <!-- Controls: search + sort -->
         <div class="catalog-controls">
           <input class="catalog-search" id="catalogSearch" type="text"
-            placeholder="Search catalog..." autocomplete="off" />
+            placeholder="Поиск по каталогу..." autocomplete="off" />
           <select class="catalog-sort" id="catalogSort">
-            <option value="name_asc">Name A-Z</option>
-            <option value="name_desc">Name Z-A</option>
-            <option value="price_asc">Price Low</option>
-            <option value="price_desc">Price High</option>
-            <option value="count_desc">Available</option>
+            <option value="name_asc">По имени А-Я</option>
+            <option value="name_desc">По имени Я-А</option>
+            <option value="price_asc">Цена ↑</option>
+            <option value="price_desc">Цена ↓</option>
+            <option value="count_desc">Больше в наличии</option>
+          </select>
+          <select class="catalog-sort" id="catalogState" title="Тип оружия">
+            <option value="all">Все</option>
+            <option value="normal">Обычные</option>
+            <option value="stattrak">StatTrak&trade;</option>
+            <option value="souvenir">Souvenir</option>
+          </select>
+          <select class="catalog-sort" id="catalogModel" title="Модель оружия" disabled>
+            <option value="">Все модели</option>
           </select>
         </div>
 
@@ -148,14 +169,14 @@
   <!-- Favorites Tab (Phase 8) -->
   <div class="tab-panel" data-tab="favorites" style="display:none;">
     <div id="favoritesGrid">
-      <div class="empty-state">No favorites yet -- click &#9825; on catalog cards</div>
+      <div class="empty-state">Пока пусто — нажми &#9825; на карточке</div>
     </div>
   </div>
 
   <!-- Wishlist Tab (Phase 8) -->
   <div class="tab-panel" data-tab="wishlist" style="display:none;">
     <div id="wishlistGrid">
-      <div class="empty-state">Wishlist is empty -- click &#9734; on catalog cards</div>
+      <div class="empty-state">Пока пусто — нажми &#9734; на карточке</div>
     </div>
   </div>
 
@@ -164,13 +185,13 @@
     <div class="cases-layout">
       <div class="cases-controls">
         <input class="catalog-search" id="casesSearch" type="text"
-          placeholder="Search cases..." autocomplete="off" />
+          placeholder="Поиск по кейсам..." autocomplete="off" />
         <select class="catalog-sort" id="casesSort">
-          <option value="name_asc">Name A-Z</option>
-          <option value="name_desc">Name Z-A</option>
-          <option value="price_asc">Price Low</option>
-          <option value="price_desc">Price High</option>
-          <option value="count_desc">Available</option>
+          <option value="name_asc">По имени А-Я</option>
+          <option value="name_desc">По имени Я-А</option>
+          <option value="price_asc">Цена ↑</option>
+          <option value="price_desc">Цена ↓</option>
+          <option value="count_desc">Больше в наличии</option>
         </select>
       </div>
       <div class="cat-grid" id="casesGrid">
