@@ -10,7 +10,8 @@
 - **VoiceType / Cypher** — работает на новом USB-микрофоне Fifine. Autostart + watchdog: `scripts/voicetype.vbs` в Startup, каждые 30с проверяет через WMI что `pythonw -m voice_type.main` жив, иначе поднимает. 15с delay после логона чтоб USB успел подняться. Двойной pythonw.exe (родитель+дочерний whisper-server) — норма, не баг.
 - **Klink** — отложено.
 - **Funding Scanner** — dashboard на VM (34.159.55.61:8080), сейчас недоступен из-за OOM VM.
-- **Diary система** — 18 записей в `memory/diary/` (репо, единый источник правды после merge 21.04). pre-compact.py, /diary, /reflect теперь все пишут/читают туда. Новые правила идут в `C:\Users\User\.claude\projects\D--code-2026-2-cortex\memory\` (MEMORY.md + feedback/project/user files — per-user, не в git).
+- **Diary система** — 19 записей в `memory/diary/` (репо, единый источник правды). pre-compact.py, /diary, /reflect все пишут/читают туда. MEMORY.md + feedback/project/user/reference — в `C:\Users\User\.claude\projects\D--code-2026-2-cortex\memory\` (per-user, не в git).
+- **Защитная сетка работает с 22.04.** `pre-commit` hook + `scripts/ops.sh test` реально прогоняют 116 тестов (104 steam-sniper + 12 metrics) за ~2с. До сегодня ссылались на удалённые `tools/heartbeat` — была false-green.
 
 ## Steam Sniper — статус после session 019
 

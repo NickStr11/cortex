@@ -56,6 +56,7 @@ video_output/
 screenshots/
 screen/
 scripts/*.png
+scripts/.claude/
 
 # Claude Code local settings (permissions, not for sharing)
 .claude/settings.local.json
