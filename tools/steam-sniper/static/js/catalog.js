@@ -6,6 +6,8 @@ import { cacheCatalogItems } from './lists.js';
 // Module state
 let _category = '';      // '' means all
 let _sort = 'name_asc';
+let _state = 'all';      // all | normal | stattrak | souvenir
+let _model = '';
 let _query = '';
 let _offset = 0;
 const _limit = 50;
@@ -13,11 +15,24 @@ let _searchTimeout = null;
 let _loaded = false;     // lazy load: only fetch when tab first activated
 
 const CAT_LABELS = {
-  knife: 'Knives', gloves: 'Gloves', rifle: 'Rifles', pistol: 'Pistols',
-  smg: 'SMGs', shotgun: 'Shotguns', machinegun: 'MGs', sticker: 'Stickers',
-  case: 'Cases', graffiti: 'Graffiti', music_kit: 'Music Kits',
-  patch: 'Patches', key: 'Keys', agent: 'Agents', other: 'Other'
+  knife: 'Ножи',
+  gloves: 'Перчатки',
+  rifle: 'Винтовки',
+  pistol: 'Пистолеты',
+  smg: 'ПП',
+  shotgun: 'Дробовики',
+  machinegun: 'Пулемёты',
+  sticker: 'Наклейки',
+  case: 'Кейсы',
+  graffiti: 'Граффити',
+  music_kit: 'Музыка',
+  patch: 'Нашивки',
+  key: 'Ключи',
+  agent: 'Агенты',
+  other: 'Другое'
 };
+
+const MODEL_FILTER_CATEGORIES = new Set(['rifle', 'pistol', 'smg', 'shotgun', 'machinegun', 'knife']);
 
 // Category emoji placeholders (lis-skins JSON has no images)
 const CAT_EMOJI = {
@@ -37,12 +52,15 @@ export async function loadCatalog() {
       sort: _sort
     });
     if (_category) params.set('category', _category);
+    if (_state && _state !== 'all') params.set('state', _state);
+    if (_model && MODEL_FILTER_CATEGORIES.has(_category)) params.set('model', _model);
     if (_query) params.set('q', _query);
 
     const r = await fetch('/api/catalog?' + params);
     const d = await r.json();
 
     renderSidebar(d.categories, d.total);
+    renderModelFilter(d.models || []);
     renderGrid(d.items);
     cacheCatalogItems(d.items);
     renderPagination(d.total, d.offset, d.limit);
@@ -91,7 +109,7 @@ function renderGrid(items) {
   if (!grid) return;
 
   if (!items || items.length === 0) {
-    grid.innerHTML = '<div class="empty-state">No items found</div>';
+    grid.innerHTML = '<div class="empty-state">Ничего не найдено</div>';
     return;
   }
 
@@ -114,8 +132,8 @@ function renderGrid(items) {
       '<div class="cat-card-bottom">' +
         '<div class="cat-card-price">' + fmtRub(item.price_rub) + '</div>' +
         '<div class="cat-card-meta">' +
-          '<div class="cat-card-category">' + item.category + '</div>' +
-          '<div class="cat-card-count' + countCls + '">' + item.count + ' qty</div>' +
+          '<div class="cat-card-category">' + (CAT_LABELS[item.category] || item.category) + '</div>' +
+          '<div class="cat-card-count' + countCls + '">' + item.count + ' шт.</div>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -189,6 +207,27 @@ function _buildPageRange(current, total) {
   return pages;
 }
 
+function renderModelFilter(models) {
+  const select = document.getElementById('catalogModel');
+  if (!select) return;
+
+  const enabled = MODEL_FILTER_CATEGORIES.has(_category) && models.length > 0;
+  select.disabled = !enabled;
+  select.parentElement?.classList.toggle('is-disabled', !enabled);
+
+  const currentExists = models.some(model => model.name === _model);
+  if (_model && !currentExists) {
+    _model = '';
+  }
+
+  const options = ['<option value="">Все модели</option>'];
+  for (const model of models) {
+    options.push('<option value="' + model.name + '">' + model.name + ' · ' + model.count + '</option>');
+  }
+  select.innerHTML = options.join('');
+  select.value = _model;
+}
+
 // --- Init: event listeners ---
 
 export function initCatalog() {
@@ -201,6 +240,7 @@ export function initCatalog() {
       const cat = btn.dataset.category;
       if (cat === undefined) return;
       _category = cat;
+      _model = '';
       _offset = 0;
       // Update active class
       sidebar.querySelectorAll('.sidebar-item').forEach(el => {
@@ -230,6 +270,25 @@ export function initCatalog() {
   if (sortSelect) {
     sortSelect.addEventListener('change', () => {
       _sort = sortSelect.value;
+      _offset = 0;
+      loadCatalog();
+    });
+  }
+
+  // State dropdown (StatTrak / Souvenir / Normal)
+  const stateSelect = document.getElementById('catalogState');
+  if (stateSelect) {
+    stateSelect.addEventListener('change', () => {
+      _state = stateSelect.value;
+      _offset = 0;
+      loadCatalog();
+    });
+  }
+
+  const modelSelect = document.getElementById('catalogModel');
+  if (modelSelect) {
+    modelSelect.addEventListener('change', () => {
+      _model = modelSelect.value;
       _offset = 0;
       loadCatalog();
     });

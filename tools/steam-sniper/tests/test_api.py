@@ -4,6 +4,7 @@ Covers API-01..07 requirements.
 """
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from pathlib import Path
 
@@ -135,6 +136,39 @@ def test_get_recent_alerts(tmp_db: Path) -> None:
     assert alerts_limited[0]["name"] == "Item B"
 
 
+def test_list_item_targets_and_cooldowns(tmp_db: Path) -> None:
+    """List targets should persist and cooldown markers should be mutable."""
+    import db
+
+    db.init_db()
+    db.add_list_item("lesha", "Kilowatt Case", "favorite")
+
+    updated = db.set_list_item_targets(
+        user_id="lesha",
+        item_name="Kilowatt Case",
+        list_type="favorite",
+        target_below_rub=100.0,
+        target_above_rub=200.0,
+    )
+    assert updated == 1
+
+    item = db.get_list_items("lesha", "favorite")[0]
+    assert item["target_below_rub"] == 100.0
+    assert item["target_above_rub"] == 200.0
+    assert item["last_notified_below_at"] is None
+
+    db.mark_list_item_notified(int(item["id"]), "below", "2026-04-17T10:00:00+03:00")
+    db.mark_list_item_notified(int(item["id"]), "above", "2026-04-17T10:10:00+03:00")
+    marked = db.get_list_items("lesha", "favorite")[0]
+    assert marked["last_notified_below_at"] == "2026-04-17T10:00:00+03:00"
+    assert marked["last_notified_above_at"] == "2026-04-17T10:10:00+03:00"
+
+    db.clear_list_item_notified(int(item["id"]), "below")
+    cleared = db.get_list_items("lesha", "favorite")[0]
+    assert cleared["last_notified_below_at"] is None
+    assert cleared["last_notified_above_at"] == "2026-04-17T10:10:00+03:00"
+
+
 # --- Integration tests for FastAPI endpoints (Task 3) ---
 
 
@@ -154,22 +188,60 @@ def client(tmp_db: Path):
             "url": "https://lis-skins.com/market/csgo/kilowatt-case/",
             "count": 1500,
         },
+        "glock-18 | vogue (field-tested)": {
+            "name": "Glock-18 | Vogue (Field-Tested)",
+            "price": 4.8,
+            "url": "https://lis-skins.com/market/csgo/glock-18-vogue-field-tested/",
+            "count": 22,
+        },
+        "tec-9 | remote control (field-tested)": {
+            "name": "Tec-9 | Remote Control (Field-Tested)",
+            "price": 2.4,
+            "url": "https://lis-skins.com/market/csgo/tec-9-remote-control-field-tested/",
+            "count": 18,
+        },
         "awp | asiimov (field-tested)": {
             "name": "AWP | Asiimov (Field-Tested)",
             "price": 25.5,
             "url": "https://lis-skins.com/market/csgo/awp-asiimov-ft/",
             "count": 42,
         },
+        "awp | asiimov (factory new)": {
+            "name": "AWP | Asiimov (Factory New)",
+            "price": 120.0,
+            "url": "https://lis-skins.com/market/csgo/awp-asiimov-fn/",
+            "count": 4,
+        },
+        "awp | asiimov (minimal wear)": {
+            "name": "AWP | Asiimov (Minimal Wear)",
+            "price": 44.0,
+            "url": "https://lis-skins.com/market/csgo/awp-asiimov-mw/",
+            "count": 17,
+        },
+        "awp | asiimov (well-worn)": {
+            "name": "AWP | Asiimov (Well-Worn)",
+            "price": 21.5,
+            "url": "https://lis-skins.com/market/csgo/awp-asiimov-ww/",
+            "count": 12,
+        },
+        "awp | asiimov (battle-scarred)": {
+            "name": "AWP | Asiimov (Battle-Scarred)",
+            "price": 18.2,
+            "url": "https://lis-skins.com/market/csgo/awp-asiimov-bs/",
+            "count": 8,
+        },
     }
     server._usd_rub = 83.0
     server._last_update = "2026-04-12T18:00:00"
 
     # Disable lifespan (no real collector)
-    async def noop():
+    async def noop(*_args, **_kwargs):
         pass
 
     _orig_collect = server._collect_once
+    _orig_load_meta = server._load_item_meta_cache
     server._collect_once = noop
+    server._load_item_meta_cache = noop
 
     from fastapi.testclient import TestClient
 
@@ -177,11 +249,26 @@ def client(tmp_db: Path):
         server._image_cache = {
             "kilowatt case": "https://images.example/kilowatt.png",
             "awp | asiimov": "https://images.example/asiimov.png",
+            "glock-18 | vogue": "https://images.example/glock.png",
+            "tec-9 | remote control": "https://images.example/tec9.png",
+        }
+        server._item_meta = {
+            "awp | asiimov (field-tested)": {
+                "rarity_name": "Covert",
+                "rarity_label": "Тайное",
+                "rarity_color": "#eb4b4b",
+            },
+            "glock-18 | vogue (field-tested)": {
+                "rarity_name": "Classified",
+                "rarity_label": "Засекреченное",
+                "rarity_color": "#d32ce6",
+            },
         }
         yield c
 
     # Restore
     server._collect_once = _orig_collect
+    server._load_item_meta_cache = _orig_load_meta
 
 
 def test_get_watchlist_empty(client) -> None:
@@ -277,11 +364,26 @@ def test_search_with_results(client) -> None:
 
 def test_catalog_includes_image_cache_results(client) -> None:
     """GET /api/catalog should expose image URLs from the local image cache."""
-    resp = client.get("/api/catalog?limit=5&offset=0&sort=name_asc")
+    resp = client.get("/api/catalog?limit=50&offset=0&sort=name_asc&q=Kilowatt")
     assert resp.status_code == 200
     data = resp.json()
     items = {item["name"]: item for item in data["items"]}
     assert items["Kilowatt Case"]["image"] == "https://images.example/kilowatt.png"
+
+
+def test_catalog_supports_model_filter(client) -> None:
+    """GET /api/catalog should expose and apply per-weapon model filters."""
+    resp = client.get("/api/catalog?category=pistol")
+    assert resp.status_code == 200
+    data = resp.json()
+    model_names = {entry["name"] for entry in data["models"]}
+    assert {"Glock-18", "Tec-9"} <= model_names
+
+    resp2 = client.get("/api/catalog?category=pistol&model=Glock-18")
+    assert resp2.status_code == 200
+    filtered = resp2.json()
+    assert filtered["total"] == 1
+    assert filtered["items"][0]["name"] == "Glock-18 | Vogue (Field-Tested)"
 
 
 def test_history_empty(client) -> None:
@@ -297,7 +399,7 @@ def test_item_detail_uses_streamed_listing_data(client, monkeypatch) -> None:
     """GET /api/item should format snapshot listing data into UI payload."""
     import server
 
-    monkeypatch.setattr(server, "snapshot_get_item_listings", lambda _name, limit: ([
+    monkeypatch.setattr(server, "snapshot_get_item_listings", lambda _name, limit, **_kwargs: ([
         {
             "id": 123,
             "price": 25.4,
@@ -305,6 +407,7 @@ def test_item_detail_uses_streamed_listing_data(client, monkeypatch) -> None:
             "paint_index": 279,
             "paint_seed": 901,
             "stickers": [{"name": "Crown", "image": "https://images.example/sticker.png"}],
+            "keychains": [{"name": "Lil' Monster", "image": "https://images.example/keychain.png"}],
             "unlock_at": None,
             "item_link": "steam://inspect/123",
         }
@@ -320,12 +423,18 @@ def test_item_detail_uses_streamed_listing_data(client, monkeypatch) -> None:
     data = resp.json()
     assert data["summary"]["name"] == "AWP | Asiimov (Field-Tested)"
     assert data["summary"]["image"] == "https://images.example/asiimov.png"
+    assert data["summary"]["rarity_label"] == "Тайное"
+    assert data["summary"]["rarity_emphasis"] is True
+    assert data["summary"]["wear_label"] == "После полевых испытаний"
     assert data["listings_total"] == 1
     assert data["listings_updated"] == "2026-04-17T08:00:00+03:00"
     assert data["snapshot_available"] is True
     assert data["snapshot_built_at"] == "2026-04-17T08:05:00+03:00"
+    assert [tier["wear"] for tier in data["wear_tiers"]] == ["FN", "MW", "FT", "WW", "BS"]
+    assert next(tier for tier in data["wear_tiers"] if tier["active"])["name"] == "AWP | Asiimov (Field-Tested)"
     assert data["listings"][0]["id"] == 123
     assert data["listings"][0]["price_usd"] == 25.4
+    assert data["listings"][0]["keychains"][0]["name"] == "Lil' Monster"
     assert data["listings"][0]["item_link"] == "steam://inspect/123"
 
 
@@ -439,6 +548,34 @@ def test_get_list_all(client) -> None:
     assert len(data["items"]) == 3
 
 
+def test_patch_list_targets_and_trigger_flags(client) -> None:
+    """PATCH /api/lists/target should persist thresholds and enrich GET /api/lists."""
+    client.post("/api/lists", json={
+        "user": "lesha",
+        "item_name": "Kilowatt Case",
+        "list_type": "favorite",
+    })
+
+    resp = client.patch("/api/lists/target", json={
+        "user": "lesha",
+        "item_name": "Kilowatt Case",
+        "list_type": "favorite",
+        "target_below_rub": 100.0,
+        "target_above_rub": 50.0,
+    })
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    resp2 = client.get("/api/lists?user=lesha&type=favorite")
+    assert resp2.status_code == 200
+    item = resp2.json()["items"][0]
+    assert item["current_price_rub"] is not None
+    assert item["target_below_rub"] == 100.0
+    assert item["target_above_rub"] == 50.0
+    assert item["alert_below_triggered"] is True
+    assert item["alert_above_triggered"] is True
+
+
 def test_get_list_missing_user(client) -> None:
     """GET /api/lists without user param returns 422."""
     resp = client.get("/api/lists")
@@ -512,3 +649,39 @@ def test_get_list_repairs_mojibake_name(client, monkeypatch, tmp_db: Path) -> No
 
     repaired = db.get_list_items("lesha", "favorite")
     assert repaired[0]["item_name"] == "AWP | Asiimov (Field-Tested)"
+
+
+def test_check_list_alerts_respects_cooldown(tmp_db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Server-side list alerts should send once and then respect cooldown."""
+    import db
+    import server
+
+    db.init_db()
+    server._prices = {
+        "kilowatt case": {
+            "name": "Kilowatt Case",
+            "price": 0.78,
+            "url": "https://lis-skins.com/market/csgo/kilowatt-case/",
+            "count": 1500,
+        },
+    }
+    server._usd_rub = 83.0
+    db.add_list_item("lesha", "Kilowatt Case", "favorite")
+    db.set_list_item_targets("lesha", "Kilowatt Case", "favorite", 100.0, None)
+
+    sent_messages: list[str] = []
+
+    async def fake_send(text: str, chat_ids=None):
+        sent_messages.append(text)
+        return 1
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("LESHA_TG_CHAT_ID", "461494896")
+    monkeypatch.setattr(server, "_send_telegram_message", fake_send)
+
+    asyncio.run(server._check_list_alerts())
+    assert len(sent_messages) == 1
+    assert "Kilowatt Case" in sent_messages[0]
+
+    asyncio.run(server._check_list_alerts())
+    assert len(sent_messages) == 1

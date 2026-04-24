@@ -3,8 +3,8 @@
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TOOLS_WITH_TESTS="tools/heartbeat tools/metrics"
-TOOLS_ALL="tools/heartbeat tools/metrics tools/kwork-monitor tools/tg-monitor tools/tg-bridge tools/tg-pharma tools/pipeline tools/scaffold"
+TOOLS_WITH_TESTS="tools/steam-sniper tools/metrics"
+TOOLS_ALL="tools/steam-sniper tools/metrics tools/kwork-monitor tools/tg-monitor tools/tg-bridge tools/tg-pharma"
 
 case "${1:-help}" in
   test)
@@ -51,7 +51,7 @@ case "${1:-help}" in
   help|*)
     echo "Usage: bash ops.sh <command>"
     echo ""
-    echo "  test     Run tests (heartbeat, metrics)"
+    echo "  test     Run tests (steam-sniper, metrics)"
     echo "  check    Typecheck all tools (pyright)"
     echo "  lint     Lint all tools (ruff)"
     echo "  sync     Install/sync deps for all tools"

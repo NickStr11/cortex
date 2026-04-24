@@ -25,6 +25,23 @@ export function isInList(itemName, listType) {
   return false;
 }
 
+export function getListEntries(itemName) {
+  const entries = [];
+  if (_favorites.has(itemName)) {
+    entries.push(
+      _favoriteItems.find((item) => item.item_name === itemName)
+      || { item_name: itemName, list_type: 'favorite' }
+    );
+  }
+  if (_wishlist.has(itemName)) {
+    entries.push(
+      _wishlistItems.find((item) => item.item_name === itemName)
+      || { item_name: itemName, list_type: 'wishlist' }
+    );
+  }
+  return entries;
+}
+
 /**
  * Cache catalog items for list tab rendering (called by catalog.js).
  */
@@ -55,6 +72,26 @@ export async function loadUserLists() {
   } catch (e) {
     console.error('loadUserLists:', e);
   }
+}
+
+export async function saveListTargets(itemName, listType, { targetBelowRub = null, targetAboveRub = null } = {}) {
+  const resp = await fetch('/api/lists/target', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      user: USER,
+      item_name: itemName,
+      list_type: listType,
+      target_below_rub: targetBelowRub,
+      target_above_rub: targetAboveRub,
+    }),
+  });
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${resp.status}`);
+  }
+  await loadUserLists();
+  return getListEntries(itemName).find((item) => item.list_type === listType) || null;
 }
 
 /**
@@ -204,6 +241,11 @@ export function initLists() {
 
   // Re-render active list tab on lists:changed
   events.on('lists:changed', () => {
+    if (location.hash === '#favorites') renderListTab('favorite', 'favoritesGrid');
+    if (location.hash === '#wishlist') renderListTab('wishlist', 'wishlistGrid');
+  });
+
+  events.on('lists:loaded', () => {
     if (location.hash === '#favorites') renderListTab('favorite', 'favoritesGrid');
     if (location.hash === '#wishlist') renderListTab('wishlist', 'wishlistGrid');
   });
