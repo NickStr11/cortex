@@ -87,3 +87,9 @@ tools/kwork-monitor/covers/
 # Lock files (runtime)
 *.lock
 !uv.lock
+
+# Huashu-Design BGM tracks (27MB, restore via scripts/fetch_huashu_bgm.sh)
+.claude/skills/huashu-design/assets/bgm-*.mp3
+
+# Huashu-Design skill (external repo, fetch via scripts/fetch_huashu_bgm.sh or git clone)
+.claude/skills/huashu-design/

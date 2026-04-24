@@ -1,23 +1,27 @@
 """Transcribe audio messages from Max (web.max.ru) chat.
 
 Usage:
-    python transcribe.py <chat_url> [--contact "Name"] [--last N]
+    python transcribe.py <chat_url> [--contact "Name"] [--last N] [--diarize]
 
 Examples:
     python transcribe.py https://web.max.ru/61245315 --contact "Леша"
     python transcribe.py https://web.max.ru/61245315 --last 5
+    python transcribe.py https://web.max.ru/61245315 --diarize   # speaker labels
 
 Requires:
     - Chrome running with CDP on port 9222 (logged into Max)
     - whisper-cli.exe + model in voice-type runtime
     - ffmpeg in PATH
+    - For --diarize: `pip install whisperx` + HF_TOKEN env (accept license at
+      huggingface.co/pyannote/speaker-diarization-3.1)
 
 Flow:
     1. Connects to existing Chrome tab via CDP (no new windows)
     2. Navigates to chat in that tab
     3. Clicks play on each audio to extract CDN URLs
-    4. Downloads (Referer: web.max.ru), converts via ffmpeg, transcribes via whisper-cli GPU
-    5. Saves runtime/max_audio/transcriptions.md
+    4. Downloads (Referer: web.max.ru), converts via ffmpeg
+    5. Transcribes via whisper-cli GPU (fast path) or WhisperX (--diarize, multi-speaker)
+    6. Saves runtime/max_audio/transcriptions.md
 """
 from __future__ import annotations
 
@@ -154,6 +158,61 @@ def _download(url: str, path: Path) -> bool:
         return False
 
 
+def _transcribe_diarize(audio_path: Path) -> str:
+    """Multi-speaker transcription via WhisperX. Returns text with [SPEAKER_XX] labels."""
+    try:
+        import whisperx  # type: ignore
+    except ImportError:
+        return "[whisperx not installed — pip install whisperx]"
+
+    hf_token = os.environ.get("HF_TOKEN")
+    if not hf_token:
+        return "[HF_TOKEN missing — set env var, accept pyannote license on HF]"
+
+    wav_path = audio_path.with_suffix(".wav")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(audio_path), "-ar", "16000", "-ac", "1", "-f", "wav", str(wav_path)],
+        capture_output=True, timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    if not wav_path.exists():
+        return "[ffmpeg failed]"
+
+    try:
+        device = "cuda"
+        model = whisperx.load_model("large-v3", device=device, compute_type="float16")
+        audio = whisperx.load_audio(str(wav_path))
+        result = model.transcribe(audio, batch_size=16)
+
+        align_model, meta = whisperx.load_align_model(language_code=result["language"], device=device)
+        result = whisperx.align(result["segments"], align_model, meta, audio, device, return_char_alignments=False)
+
+        diarize = whisperx.DiarizationPipeline(use_auth_token=hf_token, device=device)
+        diarize_segments = diarize(audio)
+        result = whisperx.assign_word_speakers(diarize_segments, result)
+
+        lines = []
+        current_speaker = None
+        buf: list[str] = []
+        for seg in result.get("segments", []):
+            spk = seg.get("speaker", "SPK?")
+            text = seg.get("text", "").strip()
+            if spk != current_speaker:
+                if buf:
+                    lines.append(f"[{current_speaker}] {' '.join(buf)}")
+                current_speaker = spk
+                buf = [text]
+            else:
+                buf.append(text)
+        if buf:
+            lines.append(f"[{current_speaker}] {' '.join(buf)}")
+        return "\n".join(lines) or "[empty]"
+    except Exception as e:
+        return f"[whisperx error: {e}]"
+    finally:
+        wav_path.unlink(missing_ok=True)
+
+
 def _transcribe(audio_path: Path) -> str:
     wav_path = audio_path.with_suffix(".wav")
     subprocess.run(
@@ -191,6 +250,7 @@ def main() -> None:
     parser.add_argument("chat_url", help="e.g. https://web.max.ru/61245315")
     parser.add_argument("--contact", default="", help="Contact name for output header")
     parser.add_argument("--last", type=int, default=None, help="Only process last N audio messages")
+    parser.add_argument("--diarize", action="store_true", help="Speaker diarization via WhisperX (slower, multi-speaker)")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(exist_ok=True)
@@ -225,7 +285,7 @@ def main() -> None:
         kb = audio_path.stat().st_size // 1024
         print(f"[{kb}KB] ", end="", flush=True)
 
-        text = _transcribe(audio_path)
+        text = _transcribe_diarize(audio_path) if args.diarize else _transcribe(audio_path)
         print(f"{text[:70]}{'...' if len(text) > 70 else ''}")
         results.append({"label": label, "text": text})
         audio_path.unlink(missing_ok=True)
