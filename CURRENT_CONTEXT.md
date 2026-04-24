@@ -10,8 +10,9 @@
 - **VoiceType / Cypher** — работает на новом USB-микрофоне Fifine. Autostart + watchdog: `scripts/voicetype.vbs` в Startup, каждые 30с проверяет через WMI что `pythonw -m voice_type.main` жив, иначе поднимает. 15с delay после логона чтоб USB успел подняться. Двойной pythonw.exe (родитель+дочерний whisper-server) — норма, не баг.
 - **Klink** — отложено.
 - **Funding Scanner** — dashboard на VM (34.159.55.61:8080), сейчас недоступен из-за OOM VM.
-- **Diary система** — 19 записей в `memory/diary/` (репо, единый источник правды). pre-compact.py, /diary, /reflect все пишут/читают туда. MEMORY.md + feedback/project/user/reference — в `C:\Users\User\.claude\projects\D--code-2026-2-cortex\memory\` (per-user, не в git).
+- **Diary система** — 22 записи в `memory/diary/` (репо, единый источник правды). pre-compact.py, /diary, /reflect все пишут/читают туда. MEMORY.md + feedback/project/user/reference — в `C:\Users\User\.claude\projects\D--code-2026-2-cortex\memory\` (per-user, не в git).
 - **Защитная сетка работает с 22.04.** `pre-commit` hook + `scripts/ops.sh test` реально прогоняют 116 тестов (104 steam-sniper + 12 metrics) за ~2с. До сегодня ссылались на удалённые `tools/heartbeat` — была false-green.
+- **Интеграции из TG-дайджестов 23-24.04 (session 022):** minimal-editing rule в глобальном agent-behavior.md; WhisperX `--diarize` флаг в max-transcribe (opt-in через `pip install whisperx` + HF_TOKEN); huashu-design skill в `.claude/skills/` всех worktree (gitignored, восстановление — `git clone` + `scripts/fetch_huashu_bgm.sh`); правило приоритета design skills (huashu > frontend-design) в MEMORY.md. PR #51 открыт в main.
 
 ## Steam Sniper — статус после session 019
 
@@ -54,10 +55,12 @@
 - [ ] PharmOrder мониторинг (OOM, sync — неделю смотрим)
 - [ ] Klink: Seedance 2.0 — выбрать платформу (Jimeng vs Dreamina)
 - [ ] Cypher: Browser Use интеграция — L3 path
-- [ ] `/reflect` — накопилось 016-020 для обработки (после merge 21.04 команда наконец видит актуальные diary)
+- [ ] `/reflect` — накопилось 016-022 для обработки (после merge 21.04 команда наконец видит актуальные diary)
 - [ ] Funding: EdgeX verifier
 - [ ] Keenetic Hopper — WireGuard VPN
 - [ ] VoiceType: если watchdog-pattern окажется мало (падает чаще раза в день) — копать controller.py daemon thread, возможно SetForegroundWindow loop
+- [ ] PR #51 merge в main когда ревью пройдёт (накопленные Steam Sniper коммиты 017-021 + WhisperX diarize)
+- [ ] Опционально: `scripts/sync_external_skills.sh` когда huashu-design начнёт «пропадать» из новых worktree (уже дважды пропадал)
 
 ## Ссылки
 
@@ -86,3 +89,10 @@
 - VPS PharmOrder: 194.87.140.204 (paramiko из Python, creds в `runtime/vps-creds.env`)
 - VoiceType / Cypher: `D:\code\2026\3\voice-type`
 - Субагент playbook: `memory/subagents-playbook.md`
+
+### Session 022 артефакты
+- PR #51: https://github.com/NickStr11/cortex/pull/51 (WhisperX diarize + Steam Sniper backlog 017-021)
+- Интерактивная карта анализов: `C:\Users\User\Desktop\Анализы_карта.html` (32 показателя, 8 групп, click-to-expand, фильтры)
+- PDF анализов: `C:\Users\User\Desktop\Анализы_крови_2026-04-03.pdf`
+- TG-digest findings: `~/.claude/projects/D--code-2026-2-cortex/memory/reference_digest-2026-04-findings.md`
+- Huashu-design skill root (не в git): `.claude/skills/huashu-design/` во всех 5 копиях (main + 4 worktree)
