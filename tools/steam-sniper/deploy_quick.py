@@ -36,6 +36,7 @@ FILES = [
     "static/js/theme.js",
     "static/js/watchlist.js",
     "static/sw.js",
+    "static/icons/logo.png",
 ]
 
 
