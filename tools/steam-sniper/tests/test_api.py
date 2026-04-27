@@ -658,6 +658,93 @@ def test_post_list_preserves_russian_wear_when_steam_search_order_is_wrong(clien
     assert item["price_rub"] == round(25.5 * server._lis_rate(), 2)
 
 
+def test_post_list_resolves_russian_agent_names_with_pipe(client, monkeypatch) -> None:
+    """Steam returns nothing for full RU agent names with '|'; resolver should fallback safely."""
+    import server
+
+    ru_soldier = "\u0421\u043e\u043b\u0434\u0430\u0442 | \u0424\u0435\u043d\u0438\u043a\u0441"
+    ru_enforcer = "\u0413\u043e\u043b\u043e\u0432\u043e\u0440\u0435\u0437 | \u0424\u0435\u043d\u0438\u043a\u0441"
+    ru_nova = "Nova | \u0421\u043e\u043b\u0434\u0430\u0442\u0438\u043a (\u041d\u0435\u043c\u043d\u043e\u0433\u043e \u043f\u043e\u043d\u043e\u0448\u0435\u043d\u043d\u043e\u0435)"
+
+    server._prices.update({
+        "soldier | phoenix": {
+            "name": "Soldier | Phoenix",
+            "price": 7.02,
+            "url": "https://lis-skins.com/market/csgo/soldier-phoenix/",
+            "count": 504,
+        },
+        "enforcer | phoenix": {
+            "name": "Enforcer | Phoenix",
+            "price": 6.85,
+            "url": "https://lis-skins.com/market/csgo/enforcer-phoenix/",
+            "count": 1108,
+        },
+        "nova | toy soldier (minimal wear)": {
+            "name": "Nova | Toy Soldier (Minimal Wear)",
+            "price": 3.67,
+            "url": "https://lis-skins.com/market/csgo/nova-toy-soldier-minimal-wear/",
+            "count": 39,
+        },
+    })
+    server._image_cache.update({
+        "soldier | phoenix": "https://images.example/soldier.png",
+        "enforcer | phoenix": "https://images.example/enforcer.png",
+    })
+
+    def fake_steam_search(query: str) -> list[dict]:
+        if query in (ru_soldier, ru_soldier.replace("|", " ").strip()):
+            return []
+        if query == "\u0421\u043e\u043b\u0434\u0430\u0442":
+            return [
+                {
+                    "hash_name": "Nova | Toy Soldier (Minimal Wear)",
+                    "name_ru": ru_nova,
+                    "type_ru": "",
+                    "image": "",
+                    "name_color": "",
+                },
+                {
+                    "hash_name": "Soldier | Phoenix",
+                    "name_ru": ru_soldier,
+                    "type_ru": "",
+                    "image": "",
+                    "name_color": "",
+                },
+            ]
+        if query in (ru_enforcer, ru_enforcer.replace("|", " ").strip()):
+            return []
+        if query == "\u0413\u043e\u043b\u043e\u0432\u043e\u0440\u0435\u0437":
+            return [{
+                "hash_name": "Enforcer | Phoenix",
+                "name_ru": ru_enforcer,
+                "type_ru": "",
+                "image": "",
+                "name_color": "",
+            }]
+        return []
+
+    monkeypatch.setattr(server, "_steam_search", fake_steam_search)
+
+    for ru_name, en_name in (
+        (ru_soldier, "Soldier | Phoenix"),
+        (ru_enforcer, "Enforcer | Phoenix"),
+    ):
+        resp = client.post("/api/lists", json={
+            "user": "lesha",
+            "item_name": ru_name,
+            "list_type": "favorite",
+        })
+        assert resp.status_code == 201
+        assert resp.json()["item_name"] == en_name
+
+    resp2 = client.get("/api/lists?user=lesha&type=favorite")
+    items = {item["item_name"]: item for item in resp2.json()["items"]}
+    assert items["Soldier | Phoenix"]["image"] == "https://images.example/soldier.png"
+    assert items["Soldier | Phoenix"]["category"] == "agent"
+    assert items["Enforcer | Phoenix"]["image"] == "https://images.example/enforcer.png"
+    assert items["Enforcer | Phoenix"]["price_rub"] == round(6.85 * server._lis_rate(), 2)
+
+
 def test_post_list_resolves_colloquial_field_tested_without_steam(client, monkeypatch) -> None:
     """Local RU fallback should understand 'послеполевые' and keep the FT price."""
     import server

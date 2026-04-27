@@ -518,6 +518,34 @@ def _normalize_spaces(text: str) -> str:
     return re.sub(r"[ \t\r\n\f\v]+", " ", text).strip()
 
 
+def _normalize_lookup_text(text: str) -> str:
+    """Normalize localized names for exact comparisons."""
+    return _normalize_spaces(_fix_mojibake(text)).lower().replace("ё", "е")
+
+
+def _localized_name_matches(candidate: str, localized: str) -> bool:
+    """Return True when Steam's localized name is the requested RU item name."""
+    return _normalize_lookup_text(candidate) == _normalize_lookup_text(localized)
+
+
+def _steam_search_queries_for_ru_name(candidate: str) -> list[str]:
+    """Build Steam search fallbacks for localized names with separators.
+
+    Steam search often returns nothing for exact RU names with " | ", while a
+    short left-side query returns the item with the correct localized name.
+    """
+    normalized = _normalize_spaces(candidate)
+    queries: list[str] = []
+    for query in (
+        normalized,
+        normalized.replace("|", " "),
+        normalized.split("|", 1)[0].strip() if "|" in normalized else "",
+    ):
+        if query and query not in queries:
+            queries.append(query)
+    return queries
+
+
 def _fetch_usd_rub() -> float:
     """Fetch USD/RUB rate from CBR."""
     req = urllib.request.Request(
@@ -1003,7 +1031,25 @@ def _resolve_item_name(name: str) -> str:
             return item["name"]
 
         if any("\u0400" <= c <= "\u04ff" for c in candidate):
-            for steam_item in _steam_search(candidate):
+            steam_results: list[dict] = []
+            for query in _steam_search_queries_for_ru_name(candidate):
+                steam_results = _steam_search(query)
+                if not steam_results:
+                    continue
+
+                # Prefer exact localized title match. Short queries like
+                # "Солдат" also return Nova | Toy Soldier before the agent.
+                for steam_item in steam_results:
+                    lis_item = _prices.get(steam_item["hash_name"].lower())
+                    if (
+                        lis_item
+                        and _localized_name_matches(candidate, steam_item.get("name_ru", ""))
+                        and _wear_matches_requested(lis_item["name"], requested_wear)
+                    ):
+                        return lis_item["name"]
+                break
+
+            for steam_item in steam_results:
                 lis_item = _prices.get(steam_item["hash_name"].lower())
                 if lis_item and _wear_matches_requested(lis_item["name"], requested_wear):
                     return lis_item["name"]
