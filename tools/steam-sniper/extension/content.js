@@ -9,12 +9,24 @@
   const MAX_CHECKS = 5;
   const CHECK_INTERVAL = 2000;
 
+  function hasWearMarker(text) {
+    return /\((factory new|minimal wear|field-tested|well-worn|battle-scarred|прямо с завода|немного поношенн(?:ое|ый)|после полевых(?: испытаний)?|послеполевые|поношенн(?:ое|ый)|закал[её]нн(?:ое|ый) в боях)\)/i.test(text || "");
+  }
+
+  function cleanTitle(text) {
+    return (text || "")
+      .replace(/\s*[-|]\s*lis-skins\.com\s*/i, "")
+      .replace(/\s*[-|]\s*Lis-Skins\s*/i, "")
+      .trim();
+  }
+
   /** Extract item name from page DOM / title. Returns null if not found. */
   function getItemName() {
-    const h1 = document.querySelector("h1");
-    if (h1 && h1.textContent.trim()) {
-      return h1.textContent.trim();
-    }
+    const candidates = [];
+    document.querySelectorAll("h1").forEach((el) => {
+      const text = el.textContent.trim();
+      if (text) candidates.push(text);
+    });
     const selectors = [
       ".market-item-name",
       ".item-name",
@@ -22,19 +34,17 @@
       "[class*='ItemName']",
     ];
     for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      if (el && el.textContent.trim()) {
-        return el.textContent.trim();
-      }
+      document.querySelectorAll(sel).forEach((el) => {
+        const text = el.textContent.trim();
+        if (text) candidates.push(text);
+      });
     }
-    const title = document.title;
+    const title = cleanTitle(document.title);
     if (title) {
-      return title
-        .replace(/\s*[-|]\s*lis-skins\.com\s*/i, "")
-        .replace(/\s*[-|]\s*Lis-Skins\s*/i, "")
-        .trim();
+      candidates.push(title);
     }
-    return null;
+
+    return candidates.find(hasWearMarker) || candidates[0] || null;
   }
 
   function isItemPage() {

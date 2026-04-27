@@ -26,6 +26,7 @@ VPS_USER = "root"
 REMOTE_DIR = "/opt/steam-sniper"
 SERVICE_DASHBOARD = "steam-sniper-dashboard"
 SERVICE_BOT = "steam-sniper-bot"
+SERVICE_SNAPSHOT_TIMER = "steam-sniper-snapshot.timer"
 
 # Project files to upload (relative to this script's directory)
 PROJECT_FILES = [
@@ -38,6 +39,7 @@ PROJECT_FILES = [
     "dashboard.html",
     "pyproject.toml",
     ".env",
+    "scripts/build_listings_snapshot.py",
 ]
 
 # Optional data files to upload when present.
@@ -53,6 +55,8 @@ STATIC_DIRS = ["static"]
 SYSTEMD_UNITS = {
     "deploy/steam-sniper-dashboard.service": f"/etc/systemd/system/{SERVICE_DASHBOARD}.service",
     "deploy/steam-sniper-bot.service": f"/etc/systemd/system/{SERVICE_BOT}.service",
+    "deploy/steam-sniper-snapshot.service": "/etc/systemd/system/steam-sniper-snapshot.service",
+    "deploy/steam-sniper-snapshot.timer": f"/etc/systemd/system/{SERVICE_SNAPSHOT_TIMER}",
 }
 
 # Nginx config (local path -> remote path)
@@ -294,7 +298,7 @@ def main() -> None:
         print("\n[9/10] Enabling and starting services...")
         run(
             client,
-            f"systemctl enable --now {SERVICE_DASHBOARD} {SERVICE_BOT}",
+            f"systemctl enable --now {SERVICE_DASHBOARD} {SERVICE_BOT} {SERVICE_SNAPSHOT_TIMER}",
             step="enable",
         )
         run(
@@ -315,6 +319,11 @@ def main() -> None:
             f"systemctl is-active {SERVICE_BOT}",
             step="verify-bot",
         )
+        snapshot_timer_status = run(
+            client,
+            f"systemctl is-active {SERVICE_SNAPSHOT_TIMER}",
+            step="verify-snapshot-timer",
+        )
 
         print("\n" + "=" * 50)
         print("  Deploy complete!")
@@ -323,6 +332,7 @@ def main() -> None:
         print(f"  Direct app: http://{VPS_HOST}:8100")
         print(f"  Dashboard:  {dash_status}")
         print(f"  Bot:        {bot_status}")
+        print(f"  Snapshot:   {snapshot_timer_status}")
 
         print("\n  HTTPS setup (when domain ready):")
         print(f"    1. Register subdomain at duckdns.org -> point to {VPS_HOST}")

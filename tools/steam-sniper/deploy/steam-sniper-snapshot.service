@@ -1,0 +1,17 @@
+[Unit]
+Description=Steam Sniper Listings Snapshot Refresh
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/opt/steam-sniper/scripts/build_listings_snapshot.py
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/steam-sniper
+EnvironmentFile=/opt/steam-sniper/.env
+ExecStart=/opt/steam-sniper/.venv/bin/python3 scripts/build_listings_snapshot.py --batch-size 2000
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+MemoryMax=450M
+TimeoutStartSec=45min

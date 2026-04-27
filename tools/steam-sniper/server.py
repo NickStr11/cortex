@@ -143,9 +143,14 @@ _RU_EN_DICT: dict[str, str] = {
     # Wear
     "прямо с завода": "factory new",
     "немного поношенное": "minimal wear",
+    "немного поношенный": "minimal wear",
     "после полевых": "field-tested",
+    "после полевых испытаний": "field-tested",
+    "послеполевые": "field-tested",
     "поношенное": "well-worn",
+    "поношенный": "well-worn",
     "закалённое в боях": "battle-scarred",
+    "закаленное в боях": "battle-scarred",
 }
 
 
@@ -220,6 +225,19 @@ _WEAR_LABELS_RU = {
 _WEAR_ORDER = ("FN", "MW", "FT", "WW", "BS")
 _MODEL_CATEGORIES = {"rifle", "pistol", "smg", "shotgun", "machinegun", "knife"}
 
+_RU_WEAR_CODES = {
+    "прямо с завода": "FN",
+    "немного поношенное": "MW",
+    "немного поношенный": "MW",
+    "после полевых испытаний": "FT",
+    "после полевых": "FT",
+    "послеполевые": "FT",
+    "послеполевый": "FT",
+    "поношенное": "WW",
+    "поношенный": "WW",
+    "закаленное в боях": "BS",
+}
+
 _RARITY_LABELS_RU = {
     "Base Grade": "Базовое",
     "Consumer Grade": "Ширпотреб",
@@ -289,6 +307,32 @@ def _wear_code_from_name(name: str) -> str | None:
     if not match:
         return None
     return _WEAR_CODES_LOWER.get(match.group(1).lower())
+
+
+def _wear_code_from_query(name: str) -> str | None:
+    """Detect requested exterior in either canonical EN or localized RU item names."""
+    wear_code = _wear_code_from_name(name)
+    if wear_code:
+        return wear_code
+
+    candidates = [name]
+    fixed = _fix_mojibake(name)
+    if fixed != name:
+        candidates.append(fixed)
+
+    aliases = sorted(_RU_WEAR_CODES.items(), key=lambda item: len(item[0]), reverse=True)
+    for candidate in candidates:
+        normalized = _normalize_spaces(candidate).lower().replace("ё", "е")
+        for label, code in aliases:
+            if label in normalized:
+                return code
+    return None
+
+
+def _wear_matches_requested(candidate_name: str, requested_wear: str | None) -> bool:
+    if not requested_wear:
+        return True
+    return _wear_code_from_name(candidate_name) == requested_wear
 
 
 def _weapon_model(name: str) -> str:
@@ -452,7 +496,7 @@ def _fix_mojibake(text: str) -> str:
     return text
 
 
-def _match_catalog_name(query: str) -> str | None:
+def _match_catalog_name(query: str, requested_wear: str | None = None) -> str | None:
     """Return canonical lis-skins name for an unambiguous search query."""
     words = query.lower().split()
     if not words:
@@ -462,6 +506,7 @@ def _match_catalog_name(query: str) -> str | None:
         item["name"]
         for name_lower, item in _prices.items()
         if all(word in name_lower for word in words)
+        and _wear_matches_requested(item["name"], requested_wear)
     ]
     if len(matches) == 1:
         return matches[0]
@@ -952,6 +997,7 @@ def _resolve_item_name(name: str) -> str:
 
     for candidate in candidates:
         candidate = _normalize_spaces(candidate)
+        requested_wear = _wear_code_from_query(candidate)
         item = _prices.get(candidate.lower())
         if item:
             return item["name"]
@@ -959,12 +1005,12 @@ def _resolve_item_name(name: str) -> str:
         if any("\u0400" <= c <= "\u04ff" for c in candidate):
             for steam_item in _steam_search(candidate):
                 lis_item = _prices.get(steam_item["hash_name"].lower())
-                if lis_item:
+                if lis_item and _wear_matches_requested(lis_item["name"], requested_wear):
                     return lis_item["name"]
 
             en_query = _translate_ru_to_en(candidate)
             if en_query:
-                matched = _match_catalog_name(en_query)
+                matched = _match_catalog_name(en_query, requested_wear=requested_wear)
                 if matched:
                     return matched
 

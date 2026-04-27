@@ -616,6 +616,73 @@ def test_post_list_normalizes_russian_name(client, monkeypatch) -> None:
     assert data["items"][0]["price_rub"] is not None
 
 
+def test_post_list_preserves_russian_wear_when_steam_search_order_is_wrong(client, monkeypatch) -> None:
+    """Resolver must not save Minimal Wear when the incoming name says Field-Tested."""
+    import server
+
+    ru_name = (
+        "AWP | "
+        "\u0410\u0437\u0438\u043c\u043e\u0432 "
+        "(\u041f\u043e\u0441\u043b\u0435 \u043f\u043e\u043b\u0435\u0432\u044b\u0445 "
+        "\u0438\u0441\u043f\u044b\u0442\u0430\u043d\u0438\u0439)"
+    )
+
+    monkeypatch.setattr(server, "_steam_search", lambda _q: [
+        {
+            "hash_name": "AWP | Asiimov (Minimal Wear)",
+            "name_ru": ru_name,
+            "type_ru": "",
+            "image": "",
+            "name_color": "",
+        },
+        {
+            "hash_name": "AWP | Asiimov (Field-Tested)",
+            "name_ru": ru_name,
+            "type_ru": "",
+            "image": "",
+            "name_color": "",
+        },
+    ])
+
+    resp = client.post("/api/lists", json={
+        "user": "lesha",
+        "item_name": ru_name,
+        "list_type": "favorite",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["item_name"] == "AWP | Asiimov (Field-Tested)"
+
+    resp2 = client.get("/api/lists?user=lesha&type=favorite")
+    item = resp2.json()["items"][0]
+    assert item["item_name"] == "AWP | Asiimov (Field-Tested)"
+    assert item["price_rub"] == round(25.5 * server._lis_rate(), 2)
+
+
+def test_post_list_resolves_colloquial_field_tested_without_steam(client, monkeypatch) -> None:
+    """Local RU fallback should understand 'послеполевые' and keep the FT price."""
+    import server
+
+    ru_name = (
+        "AWP | "
+        "\u0410\u0437\u0438\u043c\u043e\u0432 "
+        "(\u041f\u043e\u0441\u043b\u0435\u043f\u043e\u043b\u0435\u0432\u044b\u0435)"
+    )
+
+    monkeypatch.setattr(server, "_steam_search", lambda _q: [])
+
+    resp = client.post("/api/lists", json={
+        "user": "lesha",
+        "item_name": ru_name,
+        "list_type": "favorite",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["item_name"] == "AWP | Asiimov (Field-Tested)"
+
+    resp2 = client.get("/api/lists?user=lesha&type=favorite")
+    item = resp2.json()["items"][0]
+    assert item["price_rub"] == round(25.5 * server._lis_rate(), 2)
+
+
 def test_get_list_repairs_mojibake_name(client, monkeypatch, tmp_db: Path) -> None:
     """GET /api/lists should repair old mojibake entries in-place."""
     import db
