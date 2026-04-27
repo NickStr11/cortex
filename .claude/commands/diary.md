@@ -1,14 +1,15 @@
 Запиши дневниковую запись текущей сессии.
 
 1. Определи номер сессии:
-   - Посмотри файлы в `memory/diary/` (в корне репо)
+   - Посмотри файлы в `~/.claude/projects/D--code-2026-2-cortex/memory/diary/` (per-user, общий для всех worktree, НЕ в git)
    - Следующий номер = max существующий + 1 (или 001 если пусто)
+   - На Windows из git-bash путь: `/c/Users/User/.claude/projects/D--code-2026-2-cortex/memory/diary/`
 
 2. Проанализируй что было сделано в этой сессии:
    - Просмотри историю разговора (сообщения, tool calls, изменённые файлы)
    - Если контекст уже сжат — используй `git log --oneline -20` и `git diff`
 
-3. Создай файл: `memory/diary/NNN_YYYY-MM-DD.md`
+3. Создай файл: `~/.claude/projects/D--code-2026-2-cortex/memory/diary/NNN_YYYY-MM-DD.md`
 
    Формат (строго):
    ```

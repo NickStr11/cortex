@@ -1,6 +1,6 @@
 Синтезируй паттерны из дневниковых записей в правила.
 
-1. Прочитай все файлы в `memory/diary/` (в корне репо)
+1. Прочитай все файлы в `~/.claude/projects/D--code-2026-2-cortex/memory/diary/` (per-user, общий для всех worktree, НЕ в git)
 2. Прочитай текущий `CLAUDE.md`
 3. Прочитай `memory/reflections/processed.log` (в `~/.claude/projects/D--code-2026-2-cortex/memory/reflections/` — пока индекс и reflections живут там) — пропусти уже обработанные
 

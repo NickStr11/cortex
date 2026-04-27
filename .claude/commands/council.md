@@ -18,7 +18,7 @@
 
 ### Шаг 1 — Прочитай контекст
 
-1. Открой `CURRENT_CONTEXT.md`.
+1. Открой `~/.claude/projects/D--code-2026-2-cortex/CURRENT_CONTEXT.md` (per-user, не в git).
 3. Учти аргументы пользователя (`$ARGUMENTS`) как приоритет CEO.
 
 ### Шаг 2 — Сгенерируй задачи по ролям

@@ -4,7 +4,7 @@
 
 ### Шаг 1 — Собери данные
 
-1. Прочитай последние diary записи из memory/diary/ — историю сессий
+1. Прочитай последние diary записи из `~/.claude/projects/D--code-2026-2-cortex/memory/diary/` (per-user, не в git) — историю сессий
 2. Посмотри последние 20 коммитов:
    ```bash
    git log --oneline -20

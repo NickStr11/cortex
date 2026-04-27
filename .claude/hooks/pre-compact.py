@@ -2,7 +2,13 @@
 """PreCompact hook: auto-save diary entry before context compression.
 
 Reads the conversation transcript from stdin (hook input),
-extracts key actions, and writes a diary entry to memory/diary/.
+extracts key actions, and writes a diary entry to the per-user diary folder.
+
+Diary lives outside of git (per-user, shared across all worktrees) at:
+  ~/.claude/projects/D--code-2026-2-cortex/memory/diary/
+
+This avoids cross-worktree numbering collisions and keeps the context
+shared between parallel chats without git merge dance.
 """
 from __future__ import annotations
 
@@ -13,7 +19,9 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 PROJECT_DIR = Path(os.environ.get("CLAUDE_PROJECT_DIR", r"D:\code\2026\2\cortex"))
-DIARY_DIR = PROJECT_DIR / "memory" / "diary"
+# Per-user shared folder — common for all worktrees, NOT in git
+USER_PROJECT_DIR = Path.home() / ".claude" / "projects" / "D--code-2026-2-cortex"
+DIARY_DIR = USER_PROJECT_DIR / "memory" / "diary"
 
 
 def get_next_number() -> int:
