@@ -35,12 +35,30 @@
 
 | Агент | Модель | Назначение |
 |-------|--------|-----------|
-| `researcher` | Haiku | Ресёрч по коду, вебу, docs. Exa + Context7 |
+| `researcher` | Sonnet | Ресёрч по коду, вебу, docs. Exa + Context7. Confidence-маркеры на каждый факт. |
 | `max-transcriber` | Sonnet | Транскрипция голосовых из Max. Playwright + whisper |
-| `tg-digest-reader` | Haiku | Чтение TG-дайджестов с VM |
-| `code-reviewer` | Haiku | Ревью кода. Memory: project |
-| `architect` | Sonnet | Архитектура и стек |
-| `security-auditor` | Haiku | Аудит безопасности |
+| `code-reviewer` | Sonnet | Ревью кода. Memory: project |
+| `architect` | Opus | Архитектура и стек |
+
+> **2026-04-30:** Haiku убран отовсюду — у юзера квота на Sonnet недогружена, экономия не актуальна. Sonnet кратно реже галлюцинирует на числах/сравнениях, что важнее цены.
+
+### Codex CLI subagents (`.codex/agents/`) — для тяжёлых проходов
+
+| Агент | Модель | Когда звать |
+|-------|--------|-------------|
+| `repo_recon` | gpt-5.4-mini | Mapping чужого/большого repo |
+| `docs_researcher` | gpt-5.4-mini | Сверка с official docs |
+| `exa_researcher` | gpt-5.4-mini | Свежий веб-ресёрч |
+| `notebooklm_summarizer` | gpt-5.4-mini | Summary видео/PDF через NotebookLM |
+| `browser_debugger` | gpt-5.5 medium | UI bugs, скрины, network |
+| `security_reviewer` | gpt-5.5 high | Adversarial sec audit |
+| `targeted_fixer` | gpt-5.5 medium | Узкий локальный фикс |
+
+### Разделение Claude vs Codex
+
+- **Claude = orchestrator + interactive** — диалог, правки, рутина (research, transcribe)
+- **Codex = heavy specialist** — adversarial audits, repo mapping, browser debugging
+- Дубли убраны (2026-04-29): `security-auditor` и `tg-digest-reader` из `.claude/agents/` — закрыто Codex.security_reviewer и инлайновой командой
 
 ### Как использовать
 
@@ -56,12 +74,13 @@
 
 | Задача | Модель | Почему |
 |--------|--------|--------|
-| Поиск по коду, grep, чтение | Haiku | Быстро, дёшево, read-only |
-| Ревью кода, анализ | Haiku/Sonnet | Баланс скорость/качество |
+| Поиск по коду, grep, чтение | Sonnet | Точнее цитирует, не путает строки |
+| Ревью кода, анализ | Sonnet | Баланс скорость/качество |
+| Ресёрч с числами/сравнениями | Sonnet | Кратно меньше галлюцинаций на цифрах |
 | Генерация кода, сложная логика | Sonnet/Opus | Нужно качество |
 | Архитектурные решения | Opus | Максимальная глубина |
 
-Не наследовать Opus для всех субагентов — это дорого и медленно для простых задач.
+Sonnet — дефолт для всех субагентов. Opus только для архитектуры. Haiku не используется (квота юзера на Sonnet недогружена, экономия не актуальна, точность важнее).
 
 ## Промпт для субагента
 
@@ -97,6 +116,14 @@
 | Субагент вернул 500 строк анализа | Требовать структурированный вывод, ограничивать объём |
 | Каждый раз писали промпт для Max транскрипции | Оформить как кастомный агент с memory (2026-04-13) |
 | Субагент не знал про Chrome CDP flow | Вшить domain knowledge в system prompt агента (2026-04-13) |
+| Researcher упал `Prompt is too long` на списке 72 элементов | Большие списки разбивать на батчи в самом промпте; либо несколько последовательных Task с фрагментами; либо переключиться на Exa-поиск напрямую (2026-04-29) |
+| Я делал TG digest руками через `journalctl`, не через `tg-digest-reader` | Триггер "посмотреть лог на VM" / "прочитать дайджест" → СРАЗУ субагент (2026-04-29) |
+
+## Lesson capture — auto
+
+`SubagentStop` hook (`.claude/hooks/subagent-stop.py`) автоматически пишет summary каждого завершённого субагента в `.claude/agent-memory/<agent>/lessons.md` (append-only). Содержит: дату, описание задачи, tool uses, prompt-preview, ошибки, итоговый текст. Используй для чтения истории работы конкретного агента — например что `researcher` уже искал на этой неделе и какие приёмы работали.
+
+Перед запуском агента — проверь `.claude/agent-memory/<agent>/lessons.md` на повторяющиеся паттерны.
 
 ## Параллелизм
 
