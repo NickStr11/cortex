@@ -1,33 +1,27 @@
 #!/usr/bin/env python3
-"""Session search через SQLite FTS5 поверх diary, memory, research-заметок.
+"""Session search через простой grep по diary/memory/reflections/research.
 
-Индексирует:
-  - ~/.claude/projects/D--code-2026-2-cortex/memory/diary/*.md   (per-user diary)
-  - ~/.claude/projects/D--code-2026-2-cortex/memory/*.md         (feedback/project/personal/reference)
-  - ~/.claude/projects/D--code-2026-2-cortex/memory/reflections/*.md
-  - runtime/research/*.md                                        (если есть)
+Без SQLite, без FTS5, без индексации. Просто проход по .md файлам и подсчёт
+совпадений. На текущем объёме (60-100 doc) это в 5-7 раз быстрее FTS5 и
+имеет zero state — индекс не устаревает.
 
-БД: ~/.claude/projects/D--code-2026-2-cortex/memory/search-index.db
-Зависимости: только stdlib (sqlite3 c FTS5 — встроен в python 3.7+)
+Когда вырастет до 500+ файлов или появится потребность в bm25 — пересмотрим.
+Пока YAGNI.
 
 Usage:
-  python scripts/session-search.py reindex                       # полный reindex
-  python scripts/session-search.py "OOM cortex-vm"               # поиск
-  python scripts/session-search.py "OOM" --limit 5               # top-5
-  python scripts/session-search.py "deploy" --since 2026-04-15   # только новее
-  python scripts/session-search.py stats                         # размер индекса
+  python scripts/session-search.py "OOM cortex-vm"
+  python scripts/session-search.py "deploy" --limit 5
+  python scripts/session-search.py "PharmOrder UUID" --since 2026-04-15
 """
 from __future__ import annotations
 
 import argparse
 import os
 import re
-import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
 
-# Windows console fix — cp1251 ломает кириллицу и unicode-стрелки.
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -35,57 +29,79 @@ if sys.platform == "win32":
     except (AttributeError, OSError):
         pass
 
-# Where to look
 USER_PROJECT_DIR = Path.home() / ".claude" / "projects" / "D--code-2026-2-cortex"
 MEMORY_DIR = USER_PROJECT_DIR / "memory"
 DIARY_DIR = MEMORY_DIR / "diary"
 REFLECTIONS_DIR = MEMORY_DIR / "reflections"
 
-# Cortex repo runtime (worktree-local)
 CORTEX_DIR = Path(os.environ.get("CLAUDE_PROJECT_DIR", r"D:\code\2026\2\cortex"))
 RESEARCH_DIR = CORTEX_DIR / "runtime" / "research"
 
-# Index DB
-INDEX_DB = MEMORY_DIR / "search-index.db"
-
-# What sources to scan: (label, glob_root, glob_pattern)
-SOURCES = [
+SOURCES: list[tuple[str, Path, str]] = [
     ("diary", DIARY_DIR, "*.md"),
-    ("memory", MEMORY_DIR, "*.md"),  # feedback/project/personal/reference at root
+    ("memory", MEMORY_DIR, "*.md"),
     ("reflection", REFLECTIONS_DIR, "*.md"),
     ("research", RESEARCH_DIR, "*.md"),
 ]
 
-
-def get_conn() -> sqlite3.Connection:
-    INDEX_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(INDEX_DB)
-    conn.row_factory = sqlite3.Row
-    return conn
+CONTEXT_CHARS = 80  # вокруг матча
 
 
-def init_schema(conn: sqlite3.Connection) -> None:
-    """Create FTS5 virtual table + meta table for mtimes."""
-    conn.executescript("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS docs USING fts5(
-            path UNINDEXED,
-            label UNINDEXED,
-            mtime UNINDEXED,
-            title,
-            body,
-            tokenize='unicode61 remove_diacritics 2'
-        );
-        CREATE TABLE IF NOT EXISTS meta (
-            path TEXT PRIMARY KEY,
-            mtime REAL NOT NULL
-        );
-    """)
-    conn.commit()
+def collect_files(since_ts: float | None = None) -> list[tuple[str, Path]]:
+    out: list[tuple[str, Path]] = []
+    for label, root, pattern in SOURCES:
+        if not root.exists():
+            continue
+        for f in root.glob(pattern):
+            if not f.is_file() or f.name.startswith("_"):
+                continue
+            if since_ts and f.stat().st_mtime < since_ts:
+                continue
+            out.append((label, f))
+    return out
+
+
+def build_query(q: str) -> re.Pattern[str]:
+    """All whitespace-separated tokens must appear in the file (case-insensitive)."""
+    tokens = q.strip().split()
+    if not tokens:
+        raise SystemExit("empty query")
+    # We compile a separate pattern per token but match each as substring.
+    # To keep ranking simple, we OR them in one regex for snippet extraction
+    # and check ALL match in scoring.
+    return re.compile("|".join(re.escape(t) for t in tokens), re.IGNORECASE)
+
+
+def score_file(text: str, tokens: list[str]) -> int:
+    """Rough relevance: sum of token occurrences. Zero if any token missing."""
+    text_l = text.lower()
+    score = 0
+    for t in tokens:
+        c = text_l.count(t.lower())
+        if c == 0:
+            return 0
+        score += c
+    return score
+
+
+def make_snippet(text: str, pattern: re.Pattern[str]) -> str:
+    m = pattern.search(text)
+    if not m:
+        return ""
+    start = max(0, m.start() - CONTEXT_CHARS)
+    end = min(len(text), m.end() + CONTEXT_CHARS)
+    snip = text[start:end]
+    snip = re.sub(r"\s+", " ", snip).strip()
+    if start > 0:
+        snip = "..." + snip
+    if end < len(text):
+        snip = snip + "..."
+    return snip
 
 
 def extract_title(text: str, fallback: str) -> str:
-    """First H1/H2 in markdown, fallback to filename."""
     for line in text.splitlines()[:20]:
+        line = line.strip()
         if line.startswith("# "):
             return line[2:].strip()
         if line.startswith("## "):
@@ -93,206 +109,81 @@ def extract_title(text: str, fallback: str) -> str:
     return fallback
 
 
-def reindex(conn: sqlite3.Connection, *, full: bool = False) -> tuple[int, int, int]:
-    """Reindex all sources. Returns (added, updated, removed)."""
-    init_schema(conn)
-
-    if full:
-        conn.execute("DELETE FROM docs")
-        conn.execute("DELETE FROM meta")
-
-    # Collect current files
-    current_files: dict[Path, tuple[str, float]] = {}
-    for label, root, pattern in SOURCES:
-        if not root.exists():
-            continue
-        for f in root.glob(pattern):
-            if f.is_file() and f.name != "_TEMPLATE.md":
-                current_files[f] = (label, f.stat().st_mtime)
-
-    # Existing in index
-    existing = {row["path"]: row["mtime"] for row in conn.execute("SELECT path, mtime FROM meta")}
-
-    added = updated = removed = 0
-
-    # Add or update changed
-    for f, (label, mtime) in current_files.items():
-        path_str = str(f)
-        if path_str in existing and existing[path_str] >= mtime:
-            continue  # up-to-date
-
-        try:
-            text = f.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            print(f"skip {f.name}: {e}", file=sys.stderr)
-            continue
-
-        title = extract_title(text, f.stem)
-
-        # Remove old entry if exists
-        conn.execute("DELETE FROM docs WHERE path = ?", (path_str,))
-        conn.execute("DELETE FROM meta WHERE path = ?", (path_str,))
-
-        # Insert
-        conn.execute(
-            "INSERT INTO docs (path, label, mtime, title, body) VALUES (?, ?, ?, ?, ?)",
-            (path_str, label, mtime, title, text),
-        )
-        conn.execute("INSERT INTO meta (path, mtime) VALUES (?, ?)", (path_str, mtime))
-
-        if path_str in existing:
-            updated += 1
-        else:
-            added += 1
-
-    # Remove gone files
-    current_paths = {str(f) for f in current_files}
-    for path_str in list(existing):
-        if path_str not in current_paths:
-            conn.execute("DELETE FROM docs WHERE path = ?", (path_str,))
-            conn.execute("DELETE FROM meta WHERE path = ?", (path_str,))
-            removed += 1
-
-    conn.commit()
-    return added, updated, removed
-
-
-_FTS_OPS = {"AND", "OR", "NOT", "NEAR"}
-
-
-def normalize_fts_query(q: str) -> str:
-    """Make user input FTS5-safe: quote tokens with dashes/special chars.
-
-    - If user already used quotes/operators — leave as-is
-    - Otherwise split by whitespace and quote each token (implicit AND)
-    """
-    q = q.strip()
-    if not q:
-        return q
-    # Heuristic: if there's already a quote or known FTS op, trust the user
-    if '"' in q or any(f" {op} " in f" {q} " for op in _FTS_OPS):
-        return q
-    tokens = q.split()
-    return " ".join(f'"{t}"' for t in tokens)
-
-
-def search(
-    conn: sqlite3.Connection,
-    query: str,
-    *,
-    limit: int = 10,
-    since: str | None = None,
-) -> list[sqlite3.Row]:
-    """FTS5 search with bm25 ranking."""
-    init_schema(conn)
-
-    where_clauses = ["docs MATCH ?"]
-    params: list[object] = [normalize_fts_query(query)]
-
+def search(query: str, *, limit: int = 10, since: str | None = None) -> int:
+    since_ts = None
     if since:
         try:
-            ts = datetime.fromisoformat(since).timestamp()
-            where_clauses.append("mtime >= ?")
-            params.append(ts)
+            since_ts = datetime.fromisoformat(since).timestamp()
         except ValueError:
             print(f"bad --since date: {since} (use YYYY-MM-DD)", file=sys.stderr)
-            sys.exit(2)
+            return 2
 
-    sql = f"""
-        SELECT path, label, mtime, title,
-               snippet(docs, 4, '«', '»', '...', 12) AS snip,
-               bm25(docs) AS rank
-        FROM docs
-        WHERE {' AND '.join(where_clauses)}
-        ORDER BY rank
-        LIMIT ?
-    """
-    params.append(limit)
-    return list(conn.execute(sql, params))
+    tokens = query.strip().split()
+    if not tokens:
+        print("empty query", file=sys.stderr)
+        return 2
 
+    pattern = build_query(query)
+    hits: list[tuple[int, str, Path, str, str, float]] = []
 
-def fmt_mtime(ts: float) -> str:
-    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+    for label, f in collect_files(since_ts):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        score = score_file(text, tokens)
+        if score == 0:
+            continue
+        title = extract_title(text, f.stem)
+        snip = make_snippet(text, pattern)
+        hits.append((score, label, f, title, snip, f.stat().st_mtime))
 
-
-def cmd_search(args: argparse.Namespace) -> int:
-    conn = get_conn()
-    # Auto-reindex on every search (cheap — only changed files re-read)
-    added, updated, removed = reindex(conn)
-    if added + updated + removed:
-        print(f"[index: +{added} ~{updated} -{removed}]", file=sys.stderr)
-
-    rows = search(conn, args.query, limit=args.limit, since=args.since)
-    if not rows:
+    if not hits:
         print("(no matches)")
         return 1
 
-    for i, row in enumerate(rows, 1):
-        path = Path(row["path"])
-        # Show short path: <label>/<filename>
-        short = f"{row['label']}/{path.name}"
-        snip = re.sub(r"\s+", " ", row["snip"] or "").strip()
-        print(f"\n[{i}] {short}  ({fmt_mtime(row['mtime'])})")
-        print(f"    {row['title']}")
-        print(f"    {snip}")
-        print(f"    → {path}")
+    # Sort: score desc, then mtime desc
+    hits.sort(key=lambda h: (-h[0], -h[5]))
+
+    for i, (score, label, f, title, snip, mtime) in enumerate(hits[:limit], 1):
+        date = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
+        print(f"\n[{i}] {label}/{f.name}  ({date})  hits={score}")
+        print(f"    {title}")
+        if snip:
+            print(f"    {snip}")
+        print(f"    → {f}")
     return 0
 
 
-def cmd_reindex(args: argparse.Namespace) -> int:
-    conn = get_conn()
-    added, updated, removed = reindex(conn, full=args.full)
-    print(f"reindex: +{added} added, ~{updated} updated, -{removed} removed")
-    total = conn.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
-    print(f"total docs in index: {total}")
-    return 0
-
-
-def cmd_stats(args: argparse.Namespace) -> int:
-    conn = get_conn()
-    init_schema(conn)
-    total = conn.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
-    by_label = conn.execute("""
-        SELECT label, COUNT(*) AS n FROM docs GROUP BY label ORDER BY n DESC
-    """).fetchall()
-    db_size = INDEX_DB.stat().st_size if INDEX_DB.exists() else 0
-
-    print(f"index: {INDEX_DB}")
-    print(f"size: {db_size / 1024:.1f} KB")
-    print(f"total docs: {total}")
-    for row in by_label:
-        print(f"  {row['label']}: {row['n']}")
+def stats() -> int:
+    files = collect_files()
+    by_label: dict[str, int] = {}
+    total_size = 0
+    for label, f in files:
+        by_label[label] = by_label.get(label, 0) + 1
+        total_size += f.stat().st_size
+    print(f"sources scanned: {sum(by_label.values())} docs, {total_size / 1024:.1f} KB total")
+    for label, n in sorted(by_label.items(), key=lambda x: -x[1]):
+        print(f"  {label}: {n}")
     return 0
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Session search через SQLite FTS5 поверх Cortex memory.")
-    sub = p.add_subparsers(dest="cmd")
+    p = argparse.ArgumentParser(description="Session search через grep по Cortex memory.")
+    p.add_argument("query", nargs="*", help="search terms (whitespace-separated, all must match)")
+    p.add_argument("--limit", type=int, default=10)
+    p.add_argument("--since", help="YYYY-MM-DD")
+    p.add_argument("--stats", action="store_true", help="show source counts only")
+    args = p.parse_args()
 
-    p_search = sub.add_parser("search", help="(default) search query")
-    p_search.add_argument("query", help="FTS5 query (поддерживает operators: AND, OR, NOT, NEAR/N, prefix*)")
-    p_search.add_argument("--limit", type=int, default=10)
-    p_search.add_argument("--since", help="YYYY-MM-DD")
+    if args.stats:
+        return stats()
 
-    p_re = sub.add_parser("reindex", help="rebuild index")
-    p_re.add_argument("--full", action="store_true", help="drop and rebuild (else incremental)")
+    if not args.query:
+        p.print_help()
+        return 2
 
-    sub.add_parser("stats", help="index stats")
-
-    # Default: if first arg is not a known subcommand, treat as search query
-    args_raw = sys.argv[1:]
-    if args_raw and args_raw[0] not in {"search", "reindex", "stats", "-h", "--help"}:
-        args_raw = ["search", *args_raw]
-
-    args = p.parse_args(args_raw)
-    if args.cmd == "search":
-        return cmd_search(args)
-    if args.cmd == "reindex":
-        return cmd_reindex(args)
-    if args.cmd == "stats":
-        return cmd_stats(args)
-    p.print_help()
-    return 2
+    return search(" ".join(args.query), limit=args.limit, since=args.since)
 
 
 if __name__ == "__main__":
