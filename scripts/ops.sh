@@ -48,14 +48,35 @@ case "${1:-help}" in
     find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null
     echo "Cleaned."
     ;;
+  verify-tools)
+    # Domain-specific verification — tools/<x>/verify.sh если есть.
+    # Generic тесты ловят синтаксис; verify.sh — реальный production state.
+    echo "Domain verification..."
+    cd "$ROOT"
+    found=0
+    failed=0
+    for d in tools/*/; do
+      verify="$d/verify.sh"
+      [[ -f "$verify" ]] || continue
+      found=$((found+1))
+      echo ""
+      echo "=== $d ==="
+      bash "$verify" "${@:2}" || failed=$((failed+1))
+    done
+    [[ $found -eq 0 ]] && { echo "(no tools/<x>/verify.sh found — add per-tool checks)"; exit 0; }
+    echo ""
+    echo "Summary: $found tools verified, $failed failed."
+    exit $failed
+    ;;
   help|*)
     echo "Usage: bash ops.sh <command>"
     echo ""
-    echo "  test     Run tests (steam-sniper, metrics)"
-    echo "  check    Typecheck all tools (pyright)"
-    echo "  lint     Lint all tools (ruff)"
-    echo "  sync     Install/sync deps for all tools"
-    echo "  secrets  Check for leaked secrets"
-    echo "  clean    Remove __pycache__, .pytest_cache"
+    echo "  test           Run tests (steam-sniper, metrics)"
+    echo "  check          Typecheck all tools (pyright)"
+    echo "  lint           Lint all tools (ruff)"
+    echo "  sync           Install/sync deps for all tools"
+    echo "  secrets        Check for leaked secrets"
+    echo "  clean          Remove __pycache__, .pytest_cache"
+    echo "  verify-tools   Run tools/<x>/verify.sh — domain-specific production checks"
     ;;
 esac
